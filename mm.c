@@ -16,7 +16,7 @@
  *
  *************************************************************************
  *
- * @author Your Name <andrewid@andrew.cmu.edu>
+ * @author Austin Lin <allin@andrew.cmu.edu>
  */
 
 #include <assert.h>
@@ -422,6 +422,20 @@ static block_t *coalesce_block(block_t *block) {
      * at the malloc code in CS:APP and K&R, which make heavy use of macros
      * and which we no longer consider to be good style.
      */
+    dbg_requires(get_alloc(block) == false);
+
+    block_t *prev_block = find_prev(block);
+    block_t *next_block = find_next(block);
+
+    if (get_alloc(prev_block) == true && get_alloc(next_block) == true) {
+        return block;
+    }
+
+    else if (get_alloc(prev_block) == true && get_alloc(next_block) == false) {
+        
+    }
+
+    dbg_ensures(get_alloc(block) == false);
     return block;
 }
 
