@@ -422,20 +422,44 @@ static block_t *coalesce_block(block_t *block) {
      * at the malloc code in CS:APP and K&R, which make heavy use of macros
      * and which we no longer consider to be good style.
      */
+    dbg_requires(block != NULL);
+    dbg_requires(get_size(block) != 0);
     dbg_requires(get_alloc(block) == false);
 
     block_t *prev_block = find_prev(block);
     block_t *next_block = find_next(block);
+    size_t curr_block_size = get_size(block);
 
-    if (get_alloc(prev_block) == true && get_alloc(next_block) == true) {
-        return block;
+    if (curr_block_size > 0 &&
+        ((get_alloc(next_block) == false && next_block != block) ||
+         (get_alloc(prev_block) == false && prev_block != block))) {
+
+        size_t prev_block_size = get_size(prev_block);
+        size_t next_block_size = get_size(next_block);
+
+        if ((get_alloc(prev_block) == true || prev_block_size == 0) &&
+            get_alloc(next_block) == false && next_block != block) {
+            write_block(block, curr_block_size + next_block_size, false);
+        }
+
+        else if ((get_alloc(prev_block) == false && prev_block != block) &&
+                 (get_alloc(next_block) == true || next_block_size == 0)) {
+            write_block(prev_block, curr_block_size + prev_block_size, false);
+            block = prev_block;
+        }
+
+        else if ((get_alloc(prev_block) == false && prev_block != block) &&
+                 get_alloc(next_block) == false) {
+            write_block(prev_block,
+                        curr_block_size + prev_block_size + next_block_size,
+                        false);
+            block = prev_block;
+        }
+        prev_block = find_prev(block);
+        next_block = find_next(block);
+        curr_block_size = get_size(block);
     }
 
-    else if (get_alloc(prev_block) == true && get_alloc(next_block) == false) {
-        
-    }
-
-    dbg_ensures(get_alloc(block) == false);
     return block;
 }
 
