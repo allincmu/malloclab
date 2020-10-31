@@ -514,29 +514,26 @@ static block_t *coalesce_block(block_t *block) {
         size_t prev_block_size = get_size(prev_block);
         size_t next_block_size = get_size(next_block);
 
-        if ((get_alloc(prev_block) == true || prev_block_size == 0) &&
-            get_alloc(next_block) == false && next_block != block) {
+        if ((get_alloc(prev_block) == true || (get_alloc(prev_block) == false && prev_block == block)) &&
+            (get_alloc(next_block) == false || next_block == block)) {
             write_block(block, curr_block_size + next_block_size, false);
         }
 
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
-                 (get_alloc(next_block) == true || next_block_size == 0)) {
+                 (get_alloc(next_block) == true && next_block != block)) {
             write_block(prev_block, curr_block_size + prev_block_size, false);
             block = prev_block;
         }
 
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
-                 get_alloc(next_block) == false) {
+                 (get_alloc(next_block) == false && next_block != block)) {
             write_block(prev_block,
                         curr_block_size + prev_block_size + next_block_size,
                         false);
             block = prev_block;
         }
-        prev_block = find_prev(block);
-        next_block = find_next(block);
-        curr_block_size = get_size(block);
     }
-
+    dbg_assert(mm_checkheap(__LINE__));
     return block;
 }
 
@@ -716,7 +713,9 @@ bool mm_checkheap(int line) {
         print_error(error_msg);
         return false;
     }
-    for (block_t *curr_block = heap_start; get_size(curr_block) != 0;
+
+    unsigned short prev_alloc = 1;
+    for (block_t *curr_block = heap_start; get_size(curr_block) > 0;
          curr_block = find_next(curr_block)) {
         if (!block_is_alligned(curr_block)) {
             print_error("Blocks not alligned.");
@@ -727,8 +726,17 @@ bool mm_checkheap(int line) {
             return false;
         }
         if (!check_header_footer(curr_block)) {
-            print_error("Block header or footer incorrect.");
+            return false;
         }
+
+        // check to make sure coalesing is correct i.e. no free blocks next to
+        // each other
+        if (get_alloc(curr_block) == 0 && prev_alloc == 0) {
+            print_error(
+                "Coalesing incorrect. Two free consecutive blocks in heap.");
+            return false;
+        } else
+            prev_alloc = get_alloc(curr_block);
     }
 
     return true;
@@ -949,6 +957,10 @@ void *calloc(size_t elements, size_t size) {
 
     return bp;
 }
+
+// static void print_heap(){
+    
+// }
 
 /*
  *****************************************************************************
