@@ -11,8 +11,10 @@
 /mdriver
 /mdriver-dbg
 /mdriver-emulate
+/mdriver-uninit
 /.selected_course.txt
 
 # Doxygen files
 /doc/
 /doxygen.warn
+

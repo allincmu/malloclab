@@ -124,7 +124,13 @@ typedef struct block {
      * should use a union to alias this zero-length array with another struct,
      * in order to store additional types of data in the payload memory.
      */
-    char payload[0];
+    union block_contents {
+        struct {
+            struct block *prev;
+            struct block *next;
+        } free_payload_t;
+        char payload[0];
+    } block_contents_t;
 
     /*
      * TODO: delete or replace this comment once you've thought about it.
@@ -134,87 +140,17 @@ typedef struct block {
      */
 } block_t;
 
-// /** @brief Represents the header, previous and next block pointers, and
-// payload of one freed block in the heap */ typedef struct free_list {
-//     /** @brief Header contains size + allocation flag */
-//     word_t header;
-
-//     freed_block_t *prev_free_block;
-//     freed_block_t
-//     freed_block_t *next_free_block;
-
-//     /**
-//      * @brief A pointer to the block payload.
-//      *
-//      * TODO: feel free to delete this comment once you've read it carefully.
-//      * We don't know what the size of the payload will be, so we will declare
-//      * it as a zero-length array, which is a GCC compiler extension. This
-//      will
-//      * allow us to obtain a pointer to the start of the payload.
-//      *
-//      * WARNING: A zero-length array must be the last element in a struct, so
-//      * there should not be any struct fields after it. For this lab, we will
-//      * allow you to include a zero-length array in a union, as long as the
-//      * union is the last field in its containing struct. However, this is
-//      * compiler-specific behavior and should be avoided in general.
-//      *
-//      * WARNING: DO NOT cast this pointer to/from other types! Instead, you
-//      * should use a union to alias this zero-length array with another
-//      struct,
-//      * in order to store additional types of data in the payload memory.
-//      */
-//     char payload[0];
-
-//     /*
-//      * TODO: delete or replace this comment once you've thought about it.
-//      * Why can't we declare the block footer here as part of the struct?
-//      * Why do we even have footers -- will the code work fine without them?
-//      * which functions actually use the data contained in footers?
-//      */
-// } free_list_t;
-
-/** @brief Represents the header, previous and next block pointers, and
-payload of one freed block in the heap */ typedef struct freed_block {
-    /** @brief Header contains size + allocation flag */
-    word_t header;
-
-    freed_block_t *prev_free_block;
-    freed_block_t *next_free_block;
-
-    /**
-     * @brief A pointer to the block payload.
-     *
-     * TODO: feel free to delete this comment once you've read it carefully.
-     * We don't know what the size of the payload will be, so we will declare
-     * it as a zero-length array, which is a GCC compiler extension. This
-     will
-     * allow us to obtain a pointer to the start of the payload.
-     *
-     * WARNING: A zero-length array must be the last element in a struct, so
-     * there should not be any struct fields after it. For this lab, we will
-     * allow you to include a zero-length array in a union, as long as the
-     * union is the last field in its containing struct. However, this is
-     * compiler-specific behavior and should be avoided in general.
-     *
-     * WARNING: DO NOT cast this pointer to/from other types! Instead, you
-     * should use a union to alias this zero-length array with another
-     struct,
-     * in order to store additional types of data in the payload memory.
-     */
-    char payload[0];
-
-    /*
-     * TODO: delete or replace this comment once you've thought about it.
-     * Why can't we declare the block footer here as part of the struct?
-     * Why do we even have footers -- will the code work fine without them?
-     * which functions actually use the data contained in footers?
-     */
-} freed_block_t;
-
 /* Global variables */
 
 /** @brief Pointer to first block in the heap */
 static block_t *heap_start = NULL;
+
+// static free_list_t *freed_blocks = NULL;
+
+/** @brief Pointer to first freed block in the heap */
+static block_t *free_list_start = NULL;
+/** @brief Pointer to last freed block in the heap */
+static block_t *free_list_end = NULL;
 
 /*
  *****************************************************************************
@@ -393,6 +329,17 @@ static void write_epilogue(block_t *block) {
     block->header = pack(0, true);
 }
 
+static void write_next_pointer(block_t *block, block_t *next_free_block) {
+    dbg_requires(get_alloc(block) == false);
+    *((block_t **)(block + 2 * sizeof((next_free_block)))) = next_free_block;
+}
+
+static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
+    dbg_requires(get_alloc(block) == false);
+    *(block_t **)(block + sizeof((prev_free_block))) =
+        prev_free_block; /////////////////////
+}
+
 /**
  * @brief Writes a block starting at the given address.
  *
@@ -411,6 +358,16 @@ static void write_block(block_t *block, size_t size, bool alloc) {
     block->header = pack(size, alloc);
     word_t *footerp = header_to_footer(block);
     *footerp = pack(size, alloc);
+
+    if (alloc == false) {
+        // write next and prev pointers
+        write_next_pointer(block, free_list_start);
+        write_prev_pointer(block, NULL);
+        free_list_start = block;
+    }
+    if (get_size(block) != extract_size(*header_to_footer(block))) {
+        dbg_assert(get_size(block) == extract_size(*header_to_footer(block)));
+    }
 }
 
 /**
@@ -461,6 +418,82 @@ static block_t *find_prev(block_t *block) {
     word_t *footerp = find_prev_footer(block);
     size_t size = extract_size(*footerp);
     return (block_t *)((char *)block - size);
+}
+
+/**
+ * @brief Prints error messages
+ *
+ * @param[in] error_msg - string that represents the error
+ * @return nothing
+ */
+static void print_error(char *error_msg) {
+    printf("Error: %16s \n", error_msg);
+}
+
+/**
+ * @brief Checks to make sure the heap has a prologue and a epilogue
+ *
+ * @return true if the heap has a prologue and a epilogue
+ */
+bool has_epilogue_prologue() {
+    if (*(word_t *)mem_heap_lo() != pack(0, true))
+        return false;
+    if (*(word_t *)(mem_heap_hi() - 7) != pack(0, true))
+        return false;
+    return true;
+}
+
+/**
+ * @brief Checks to make sure the block is alligned
+ *
+ * @param[in] curr_block - pointer of the block to be tested
+ * @return true if address is a multiple of 16 false otherwise
+ */
+static bool block_is_alligned(block_t *curr_block) {
+    if ((size_t)curr_block % (size_t)8 != 0) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Checks to make sure the block is within heap boundaries
+ *
+ * @param[in] curr_block - pointer of the block to be tested
+ * @return true if block address is witin the heap boundaries false otherwise
+ */
+static bool block_within_heap(block_t *curr_block) {
+    if ((void *)curr_block < mem_heap_lo() ||
+        (void *)curr_block > mem_heap_hi()) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Checks to make sure the block's header and footer is valid
+ *
+ * @param[in] curr_block - pointer of the block to be tested
+ * @return true if block is larger than min size, and header and footer are
+ * consistent
+ */
+static bool check_header_footer(block_t *curr_block) {
+    word_t header = curr_block->header;
+    word_t footer = *header_to_footer(curr_block);
+
+    if (get_size(curr_block) < min_block_size) {
+        print_error("Block smaller than min size.");
+        return false;
+    }
+    if (extract_size(header) != extract_size(footer)) {
+        print_error("Block size inconsistent between header and footer.");
+        return false;
+    }
+    if (extract_alloc(header) != extract_alloc(footer)) {
+        print_error("Block alloc bit inconsistent between header and footer.");
+        return false;
+    }
+    return true;
 }
 
 /*
@@ -526,7 +559,7 @@ static block_t *coalesce_block(block_t *block) {
          */
         if ((get_alloc(prev_block) == true ||
              (get_alloc(prev_block) == false && prev_block == block)) &&
-            (get_alloc(next_block) == false)) {
+            (get_alloc(next_block) == false && next_block != block)) {
             write_block(block, curr_block_size + next_block_size, false);
         }
 
@@ -546,6 +579,7 @@ static block_t *coalesce_block(block_t *block) {
             block = prev_block;
         }
     }
+    dbg_assert(check_header_footer(block));
     dbg_assert(mm_checkheap(__LINE__));
     return block;
 }
@@ -580,6 +614,14 @@ static block_t *extend_heap(size_t size) {
     // Initialize free block header/footer
     block_t *block = payload_to_header(bp);
     write_block(block, size, false);
+
+    // if there are no blocks in the heap, set free_list_start to this block
+    if (free_list_start == NULL) {
+        free_list_start = block;
+    }
+
+    // set free_list_end to the newly allocated block
+    free_list_end = block;
 
     // Create new epilogue header
     block_t *block_next = find_next(block);
@@ -641,71 +683,6 @@ static block_t *find_fit(size_t asize) {
         }
     }
     return NULL; // no fit found
-}
-
-static void print_error(char *error_msg) {
-    printf("Error: %16s \n", error_msg);
-}
-
-bool has_epilogue_prologue() {
-    if (*(word_t *)mem_heap_lo() != pack(0, true))
-        return false;
-    if (*(word_t *)(mem_heap_hi() - 7) != pack(0, true))
-        return false;
-    return true;
-}
-
-/**
- * @brief Checks to make sure the block is alligned
- *
- * @param[in] curr_block - pointer of the block to be tested
- * @return true if address is a multiple of 16 false otherwise
- */
-static bool block_is_alligned(block_t *curr_block) {
-    if ((size_t)curr_block % (size_t)8 != 0) {
-        return false;
-    }
-    return true;
-}
-
-/**
- * @brief Checks to make sure the block is within heap boundaries
- *
- * @param[in] curr_block - pointer of the block to be tested
- * @return true if block address is witin the heap boundaries false otherwise
- */
-static bool block_within_heap(block_t *curr_block) {
-    if ((void *)curr_block < mem_heap_lo() ||
-        (void *)curr_block > mem_heap_hi()) {
-        return false;
-    }
-    return true;
-}
-
-/**
- * @brief Checks to make sure the block's header and footer is valid
- *
- * @param[in] curr_block - pointer of the block to be tested
- * @return true if block is larger than min size, and header and footer are
- * consistent
- */
-static bool check_header_footer(block_t *curr_block) {
-    word_t header = curr_block->header;
-    word_t footer = *header_to_footer(curr_block);
-
-    if (get_size(curr_block) < min_block_size) {
-        print_error("Block smaller than min size.");
-        return false;
-    }
-    if (extract_size(header) != extract_size(footer)) {
-        print_error("Block size inconsistent between header and footer.");
-        return false;
-    }
-    if (extract_alloc(header) != extract_alloc(footer)) {
-        print_error("Block alloc bit inconsistent between header and footer.");
-        return false;
-    }
-    return true;
 }
 
 /**
