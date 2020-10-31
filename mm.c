@@ -633,8 +633,8 @@ static block_t *find_fit(size_t asize) {
     return NULL; // no fit found
 }
 
-static void print_error(char *error_msg, int line) {
-    printf("Line: %d \t%16s \n", line, error_msg);
+static void print_error(char *error_msg) {
+    printf("Error: %16s \n", error_msg);
 }
 
 bool has_epilogue_prologue() {
@@ -658,9 +658,41 @@ static bool block_is_alligned(block_t *curr_block) {
     return true;
 }
 
+/**
+ * @brief Checks to make sure the block is within heap boundaries
+ *
+ * @param[in] curr_block - pointer of the block to be tested
+ * @return true if block address is witin the heap boundaries false otherwise
+ */
 static bool block_within_heap(block_t *curr_block) {
     if ((void *)curr_block < mem_heap_lo() ||
         (void *)curr_block > mem_heap_hi()) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Checks to make sure the block's header and footer is valid
+ *
+ * @param[in] curr_block - pointer of the block to be tested
+ * @return true if block is larger than min size, and header and footer are
+ * consistent
+ */
+static bool check_header_footer(block_t *curr_block) {
+    word_t header = curr_block->header;
+    word_t footer = *header_to_footer(curr_block);
+
+    if (get_size(curr_block) < min_block_size) {
+        print_error("Block smaller than min size.");
+        return false;
+    }
+    if (extract_size(header) != extract_size(footer)) {
+        print_error("Block size inconsistent between header and footer.");
+        return false;
+    }
+    if (extract_alloc(header) != extract_alloc(footer)) {
+        print_error("Block alloc bit inconsistent between header and footer.");
         return false;
     }
     return true;
@@ -678,33 +710,24 @@ static bool block_within_heap(block_t *curr_block) {
  * @return
  */
 bool mm_checkheap(int line) {
-    /*
-     * TODO: Delete this comment!
-     *
-     * You will need to write the heap checker yourself.
-     * Please keep modularity in mind when you're writing the heap checker!
-     *
-     * As a filler: one guacamole is equal to 6.02214086 x 10**23 guacas.
-     * One might even call it...  the avocado's number.
-     *
-     * Internal use only: If you mix guacamole on your bibimbap,
-     * do you eat it with a pair of chopsticks, or with a spoon?
-     */
 
     if (!has_epilogue_prologue()) {
         char *error_msg = "No prologue or epilogue.";
-        print_error(error_msg, line);
+        print_error(error_msg);
         return false;
     }
     for (block_t *curr_block = heap_start; get_size(curr_block) != 0;
          curr_block = find_next(curr_block)) {
         if (!block_is_alligned(curr_block)) {
-            print_error("Blocks not alligned.", line);
+            print_error("Blocks not alligned.");
             return false;
         }
         if (!block_within_heap(curr_block)) {
-            print_error("Block not within block boundaries.", line);
+            print_error("Block not within block boundaries.");
             return false;
+        }
+        if (!check_header_footer(curr_block)) {
+            print_error("Block header or footer incorrect.");
         }
     }
 
