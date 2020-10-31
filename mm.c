@@ -173,43 +173,43 @@ typedef struct block {
 //      */
 // } free_list_t;
 
-// /** @brief Represents the header, previous and next block pointers, and
-// payload of one freed block in the heap */ typedef struct freed_block {
-//     /** @brief Header contains size + allocation flag */
-//     word_t header;
+/** @brief Represents the header, previous and next block pointers, and
+payload of one freed block in the heap */ typedef struct freed_block {
+    /** @brief Header contains size + allocation flag */
+    word_t header;
 
-//     freed_block_t *prev_free_block;
-//     freed_block_t *next_free_block;
+    freed_block_t *prev_free_block;
+    freed_block_t *next_free_block;
 
-//     /**
-//      * @brief A pointer to the block payload.
-//      *
-//      * TODO: feel free to delete this comment once you've read it carefully.
-//      * We don't know what the size of the payload will be, so we will declare
-//      * it as a zero-length array, which is a GCC compiler extension. This
-//      will
-//      * allow us to obtain a pointer to the start of the payload.
-//      *
-//      * WARNING: A zero-length array must be the last element in a struct, so
-//      * there should not be any struct fields after it. For this lab, we will
-//      * allow you to include a zero-length array in a union, as long as the
-//      * union is the last field in its containing struct. However, this is
-//      * compiler-specific behavior and should be avoided in general.
-//      *
-//      * WARNING: DO NOT cast this pointer to/from other types! Instead, you
-//      * should use a union to alias this zero-length array with another
-//      struct,
-//      * in order to store additional types of data in the payload memory.
-//      */
-//     char payload[0];
+    /**
+     * @brief A pointer to the block payload.
+     *
+     * TODO: feel free to delete this comment once you've read it carefully.
+     * We don't know what the size of the payload will be, so we will declare
+     * it as a zero-length array, which is a GCC compiler extension. This
+     will
+     * allow us to obtain a pointer to the start of the payload.
+     *
+     * WARNING: A zero-length array must be the last element in a struct, so
+     * there should not be any struct fields after it. For this lab, we will
+     * allow you to include a zero-length array in a union, as long as the
+     * union is the last field in its containing struct. However, this is
+     * compiler-specific behavior and should be avoided in general.
+     *
+     * WARNING: DO NOT cast this pointer to/from other types! Instead, you
+     * should use a union to alias this zero-length array with another
+     struct,
+     * in order to store additional types of data in the payload memory.
+     */
+    char payload[0];
 
-//     /*
-//      * TODO: delete or replace this comment once you've thought about it.
-//      * Why can't we declare the block footer here as part of the struct?
-//      * Why do we even have footers -- will the code work fine without them?
-//      * which functions actually use the data contained in footers?
-//      */
-// } freed_block_t;
+    /*
+     * TODO: delete or replace this comment once you've thought about it.
+     * Why can't we declare the block footer here as part of the struct?
+     * Why do we even have footers -- will the code work fine without them?
+     * which functions actually use the data contained in footers?
+     */
+} freed_block_t;
 
 /* Global variables */
 
@@ -507,26 +507,39 @@ static block_t *coalesce_block(block_t *block) {
     block_t *next_block = find_next(block);
     size_t curr_block_size = get_size(block);
 
+    // case 1 do not go into the for loop
+    /* prev_block == block when prev_block is the prolgue block. the prologue
+     * block is freed and we do not want to coalesce the prologue block with
+     * block
+     */
     if (curr_block_size > 0 &&
-        ((get_alloc(next_block) == false && next_block != block) ||
+        ((get_alloc(next_block) == false) ||
          (get_alloc(prev_block) == false && prev_block != block))) {
 
         size_t prev_block_size = get_size(prev_block);
         size_t next_block_size = get_size(next_block);
 
-        if ((get_alloc(prev_block) == true || (get_alloc(prev_block) == false && prev_block == block)) &&
-            (get_alloc(next_block) == false || next_block == block)) {
+        // case 2
+        /* prev_block == block when prev_block is the prolgue block. the
+         * prologue block is freed and we do not want to coalesce the prologue
+         *block with block
+         */
+        if ((get_alloc(prev_block) == true ||
+             (get_alloc(prev_block) == false && prev_block == block)) &&
+            (get_alloc(next_block) == false)) {
             write_block(block, curr_block_size + next_block_size, false);
         }
 
+        // case 3
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
-                 (get_alloc(next_block) == true && next_block != block)) {
+                 (get_alloc(next_block) == true)) {
             write_block(prev_block, curr_block_size + prev_block_size, false);
             block = prev_block;
         }
 
+        // case 4
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
-                 (get_alloc(next_block) == false && next_block != block)) {
+                 (get_alloc(next_block) == false)) {
             write_block(prev_block,
                         curr_block_size + prev_block_size + next_block_size,
                         false);
@@ -959,7 +972,7 @@ void *calloc(size_t elements, size_t size) {
 }
 
 // static void print_heap(){
-    
+
 // }
 
 /*
