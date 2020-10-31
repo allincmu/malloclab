@@ -110,8 +110,8 @@ typedef struct freed_block_contents {
 } freed_block_contents_t;
 
 typedef union block_contents {
-    /** @brief Header contains size + allocation flag */
-    freed_block_contents_t *prev_next_pointers;
+    /** @brief pointer to the free and next pointers */
+    freed_block_contents_t prev_next_pointers;
 
     /**
      * @brief A pointer to the block payload.
@@ -124,7 +124,11 @@ typedef struct block {
 
     /** @brief Header contains size + allocation flag */
     word_t header;
-    block_contents_t *payload_contents;
+
+    /**
+     * @brief A pointer to the block payload.
+     */
+    block_contents_t payload_contents;
 
 } block_t;
 
@@ -241,7 +245,7 @@ static block_t *payload_to_header(void *bp) {
  */
 static void *header_to_payload(block_t *block) {
     dbg_requires(get_size(block) != 0);
-    return (void *)(block->payload_contents);
+    return (void *)(&block->payload_contents);
 }
 
 /**
@@ -254,7 +258,8 @@ static void *header_to_payload(block_t *block) {
 static word_t *header_to_footer(block_t *block) {
     dbg_requires(get_size(block) != 0 &&
                  "Called header_to_footer on the epilogue block");
-    return (word_t *)(block->payload_contents + get_size(block) - dsize);
+    return (word_t *)(((void *)&block->payload_contents) + get_size(block) -
+                      dsize);
 }
 
 /**
@@ -319,13 +324,17 @@ static void write_epilogue(block_t *block) {
 
 static void write_next_pointer(block_t *block, block_t *next_free_block) {
     dbg_requires(get_alloc(block) == false);
-    block->payload_contents->prev_next_pointers->next = next_free_block;
+    ((freed_block_contents_t *)&(
+         ((block_contents_t *)&(block->payload_contents))->prev_next_pointers))
+        ->next = next_free_block;
     // *((block_t **)(block + 2 * sizeof((next_free_block)))) = next_free_block;
 }
 
 static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
     dbg_requires(get_alloc(block) == false);
-    block->payload_contents->prev_next_pointers->prev = prev_free_block;
+    ((freed_block_contents_t *)&(
+         ((block_contents_t *)&(block->payload_contents))->prev_next_pointers))
+        ->prev = prev_free_block;
     // *(block_t **)(block + sizeof((prev_free_block))) =
     //     prev_free_block; /////////////////////
 }
