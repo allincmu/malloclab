@@ -134,6 +134,83 @@ typedef struct block {
      */
 } block_t;
 
+// /** @brief Represents the header, previous and next block pointers, and
+// payload of one freed block in the heap */ typedef struct free_list {
+//     /** @brief Header contains size + allocation flag */
+//     word_t header;
+
+//     freed_block_t *prev_free_block;
+//     freed_block_t
+//     freed_block_t *next_free_block;
+
+//     /**
+//      * @brief A pointer to the block payload.
+//      *
+//      * TODO: feel free to delete this comment once you've read it carefully.
+//      * We don't know what the size of the payload will be, so we will declare
+//      * it as a zero-length array, which is a GCC compiler extension. This
+//      will
+//      * allow us to obtain a pointer to the start of the payload.
+//      *
+//      * WARNING: A zero-length array must be the last element in a struct, so
+//      * there should not be any struct fields after it. For this lab, we will
+//      * allow you to include a zero-length array in a union, as long as the
+//      * union is the last field in its containing struct. However, this is
+//      * compiler-specific behavior and should be avoided in general.
+//      *
+//      * WARNING: DO NOT cast this pointer to/from other types! Instead, you
+//      * should use a union to alias this zero-length array with another
+//      struct,
+//      * in order to store additional types of data in the payload memory.
+//      */
+//     char payload[0];
+
+//     /*
+//      * TODO: delete or replace this comment once you've thought about it.
+//      * Why can't we declare the block footer here as part of the struct?
+//      * Why do we even have footers -- will the code work fine without them?
+//      * which functions actually use the data contained in footers?
+//      */
+// } free_list_t;
+
+// /** @brief Represents the header, previous and next block pointers, and
+// payload of one freed block in the heap */ typedef struct freed_block {
+//     /** @brief Header contains size + allocation flag */
+//     word_t header;
+
+//     freed_block_t *prev_free_block;
+//     freed_block_t *next_free_block;
+
+//     /**
+//      * @brief A pointer to the block payload.
+//      *
+//      * TODO: feel free to delete this comment once you've read it carefully.
+//      * We don't know what the size of the payload will be, so we will declare
+//      * it as a zero-length array, which is a GCC compiler extension. This
+//      will
+//      * allow us to obtain a pointer to the start of the payload.
+//      *
+//      * WARNING: A zero-length array must be the last element in a struct, so
+//      * there should not be any struct fields after it. For this lab, we will
+//      * allow you to include a zero-length array in a union, as long as the
+//      * union is the last field in its containing struct. However, this is
+//      * compiler-specific behavior and should be avoided in general.
+//      *
+//      * WARNING: DO NOT cast this pointer to/from other types! Instead, you
+//      * should use a union to alias this zero-length array with another
+//      struct,
+//      * in order to store additional types of data in the payload memory.
+//      */
+//     char payload[0];
+
+//     /*
+//      * TODO: delete or replace this comment once you've thought about it.
+//      * Why can't we declare the block footer here as part of the struct?
+//      * Why do we even have footers -- will the code work fine without them?
+//      * which functions actually use the data contained in footers?
+//      */
+// } freed_block_t;
+
 /* Global variables */
 
 /** @brief Pointer to first block in the heap */
@@ -501,6 +578,7 @@ static block_t *extend_heap(size_t size) {
     // Coalesce in case the previous block was free
     block = coalesce_block(block);
 
+    dbg_ensures(mm_checkheap(__LINE__));
     return block;
 }
 
@@ -555,6 +633,20 @@ static block_t *find_fit(size_t asize) {
     return NULL; // no fit found
 }
 
+void print_error(char *error_msg, int line) {
+    printf("Line: %d \t%16s \n", line, error_msg);
+}
+
+bool has_epilogue_prologue() {
+    if (*(word_t *)mem_heap_lo() != pack(0, true))
+        return false;
+    if (*(word_t *)(mem_heap_hi() - 7) != pack(0, true))
+        return false;
+    return true;
+}
+
+bool block_is_alligned(curr_block)
+
 /**
  * @brief
  *
@@ -579,6 +671,20 @@ bool mm_checkheap(int line) {
      * Internal use only: If you mix guacamole on your bibimbap,
      * do you eat it with a pair of chopsticks, or with a spoon?
      */
+
+    if (!has_epilogue_prologue()) {
+        char *error_msg = "No prologue or epilogue.";
+        print_error(error_msg, line);
+        return false;
+    }
+    for (block_t *curr_block = heap_start;
+         (void *)curr_block < (mem_heap_hi() - 7);
+         curr_block = find_next(curr_block)) {
+        if (!block_is_alligned(curr_block)) {
+            print_error("hello", line);
+            return false;
+        }
+    }
 
     return true;
 }
@@ -617,7 +723,6 @@ bool mm_init(void) {
     if (extend_heap(chunksize) == NULL) {
         return false;
     }
-
     return true;
 }
 
