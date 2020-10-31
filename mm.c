@@ -633,7 +633,7 @@ static block_t *find_fit(size_t asize) {
     return NULL; // no fit found
 }
 
-void print_error(char *error_msg, int line) {
+static void print_error(char *error_msg, int line) {
     printf("Line: %d \t%16s \n", line, error_msg);
 }
 
@@ -645,7 +645,18 @@ bool has_epilogue_prologue() {
     return true;
 }
 
-bool block_is_alligned(curr_block)
+/**
+ * @brief Checks to make sure the block is alligned
+ *
+ * @param[in] curr_block - pointer of the block to be tested
+ * @return true if address is a multiple of 16 false otherwise
+ */
+static bool block_is_alligned(block_t *curr_block) {
+    if ((size_t)curr_block % (size_t)8 != 0) {
+        return false;
+    }
+    return true;
+}
 
 /**
  * @brief
@@ -681,7 +692,7 @@ bool mm_checkheap(int line) {
          (void *)curr_block < (mem_heap_hi() - 7);
          curr_block = find_next(curr_block)) {
         if (!block_is_alligned(curr_block)) {
-            print_error("hello", line);
+            print_error("Blocks not alligned.", line);
             return false;
         }
     }
