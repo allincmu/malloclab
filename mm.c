@@ -101,43 +101,31 @@ static const word_t alloc_mask = 0x1;
  */
 static const word_t size_mask = ~(word_t)0xF;
 
-/** @brief Represents the header and payload of one block in the heap */
-typedef struct block {
+typedef struct block block_t;
+typedef struct freed_block_contents {
+
+    block_t *prev;
+    block_t *next;
+
+} freed_block_contents_t;
+
+typedef union block_contents {
     /** @brief Header contains size + allocation flag */
-    word_t header;
+    freed_block_contents_t *prev_next_pointers;
 
     /**
      * @brief A pointer to the block payload.
-     *
-     * TODO: feel free to delete this comment once you've read it carefully.
-     * We don't know what the size of the payload will be, so we will declare
-     * it as a zero-length array, which is a GCC compiler extension. This will
-     * allow us to obtain a pointer to the start of the payload.
-     *
-     * WARNING: A zero-length array must be the last element in a struct, so
-     * there should not be any struct fields after it. For this lab, we will
-     * allow you to include a zero-length array in a union, as long as the
-     * union is the last field in its containing struct. However, this is
-     * compiler-specific behavior and should be avoided in general.
-     *
-     * WARNING: DO NOT cast this pointer to/from other types! Instead, you
-     * should use a union to alias this zero-length array with another struct,
-     * in order to store additional types of data in the payload memory.
      */
-    union block_contents {
-        struct {
-            struct block *prev;
-            struct block *next;
-        } free_payload_t;
-        char payload[0];
-    } block_contents_t;
+    char payload[0];
+} block_contents_t;
 
-    /*
-     * TODO: delete or replace this comment once you've thought about it.
-     * Why can't we declare the block footer here as part of the struct?
-     * Why do we even have footers -- will the code work fine without them?
-     * which functions actually use the data contained in footers?
-     */
+/** @brief Represents the header and payload of one block in the heap */
+typedef struct block {
+
+    /** @brief Header contains size + allocation flag */
+    word_t header;
+    block_contents_t *payload_contents;
+
 } block_t;
 
 /* Global variables */
@@ -241,7 +229,7 @@ static size_t get_size(block_t *block) {
  * @return The corresponding block
  */
 static block_t *payload_to_header(void *bp) {
-    return (block_t *)((char *)bp - offsetof(block_t, payload));
+    return (block_t *)((char *)bp - offsetof(block_t, payload_contents));
 }
 
 /**
@@ -253,7 +241,7 @@ static block_t *payload_to_header(void *bp) {
  */
 static void *header_to_payload(block_t *block) {
     dbg_requires(get_size(block) != 0);
-    return (void *)(block->payload);
+    return (void *)(block->payload_contents);
 }
 
 /**
@@ -266,7 +254,7 @@ static void *header_to_payload(block_t *block) {
 static word_t *header_to_footer(block_t *block) {
     dbg_requires(get_size(block) != 0 &&
                  "Called header_to_footer on the epilogue block");
-    return (word_t *)(block->payload + get_size(block) - dsize);
+    return (word_t *)(block->payload_contents + get_size(block) - dsize);
 }
 
 /**
@@ -331,13 +319,15 @@ static void write_epilogue(block_t *block) {
 
 static void write_next_pointer(block_t *block, block_t *next_free_block) {
     dbg_requires(get_alloc(block) == false);
-    *((block_t **)(block + 2 * sizeof((next_free_block)))) = next_free_block;
+    block->payload_contents->prev_next_pointers->next = next_free_block;
+    // *((block_t **)(block + 2 * sizeof((next_free_block)))) = next_free_block;
 }
 
 static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
     dbg_requires(get_alloc(block) == false);
-    *(block_t **)(block + sizeof((prev_free_block))) =
-        prev_free_block; /////////////////////
+    block->payload_contents->prev_next_pointers->prev = prev_free_block;
+    // *(block_t **)(block + sizeof((prev_free_block))) =
+    //     prev_free_block; /////////////////////
 }
 
 /**
