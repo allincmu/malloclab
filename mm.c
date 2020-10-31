@@ -658,6 +658,14 @@ static bool block_is_alligned(block_t *curr_block) {
     return true;
 }
 
+static bool block_within_heap(block_t *curr_block) {
+    if ((void *)curr_block < mem_heap_lo() ||
+        (void *)curr_block > mem_heap_hi()) {
+        return false;
+    }
+    return true;
+}
+
 /**
  * @brief
  *
@@ -688,11 +696,14 @@ bool mm_checkheap(int line) {
         print_error(error_msg, line);
         return false;
     }
-    for (block_t *curr_block = heap_start;
-         (void *)curr_block < (mem_heap_hi() - 7);
+    for (block_t *curr_block = heap_start; get_size(curr_block) != 0;
          curr_block = find_next(curr_block)) {
         if (!block_is_alligned(curr_block)) {
             print_error("Blocks not alligned.", line);
+            return false;
+        }
+        if (!block_within_heap(curr_block)) {
+            print_error("Block not within block boundaries.", line);
             return false;
         }
     }
