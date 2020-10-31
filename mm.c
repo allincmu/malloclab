@@ -317,13 +317,11 @@ static bool get_alloc(block_t *block) {
  * @param[out] block The location to write the epilogue header
  */
 static void write_epilogue(block_t *block) {
-    dbg_requires(block != NULL);
     dbg_requires((char *)block == mem_heap_hi() - 7);
     block->header = pack(0, true);
 }
 
 static void write_next_pointer(block_t *block, block_t *next_free_block) {
-    dbg_requires(get_alloc(block) == false);
     ((freed_block_contents_t *)&(
          ((block_contents_t *)&(block->payload_contents))->prev_next_pointers))
         ->next = next_free_block;
@@ -331,7 +329,7 @@ static void write_next_pointer(block_t *block, block_t *next_free_block) {
 }
 
 static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
-    dbg_requires(get_alloc(block) == false);
+    dbg_requires((block) != NULL);
     ((freed_block_contents_t *)&(
          ((block_contents_t *)&(block->payload_contents))->prev_next_pointers))
         ->prev = prev_free_block;
@@ -360,12 +358,15 @@ static void write_block(block_t *block, size_t size, bool alloc) {
 
     if (alloc == false) {
         // write next and prev pointers
-        write_next_pointer(block, free_list_start);
+        if (free_list_start != block)
+            write_next_pointer(block, free_list_start);
         write_prev_pointer(block, NULL);
-        if (free_list_start != NULL)
-        write_prev_pointer(free_list_start, block);
+        if (free_list_start != NULL && get_alloc(free_list_start) == false &&
+            free_list_start != block)
+            write_prev_pointer(free_list_start, block);
         free_list_start = block;
     }
+
     if (get_size(block) != extract_size(*header_to_footer(block))) {
         dbg_assert(get_size(block) == extract_size(*header_to_footer(block)));
     }
@@ -498,6 +499,7 @@ static bool check_header_footer(block_t *curr_block) {
 }
 
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
+    dbg_assert(block != NULL);
     block_contents_t *block_payload_start =
         (block_contents_t *)&(block->payload_contents);
     freed_block_contents_t *prev_next_pointers =
@@ -515,17 +517,18 @@ static block_t *get_next_free_block(block_t *block) {
     return prev_next_pointers->next;
 }
 
-static void print_heap() {
+static void print_heap(char *msg) {
     for (block_t *curr_block = heap_start; get_size(curr_block) > 0;
          curr_block = find_next(curr_block)) {
         if (get_alloc(curr_block) == false) {
-            printf(
-                "addr: %p \t size: %zu \t alloc: %d \t next: %p \t prev: %p \n",
-                curr_block, get_size(curr_block), get_alloc(curr_block),
-                (void *)get_next_free_block(curr_block),
-                (void *)get_prev_free_block(curr_block));
+            printf("addr: %p \t size: %zu \t alloc: %d \t prev: %p \t next: %p "
+                   "\t msg: %s \n",
+                   curr_block, get_size(curr_block), get_alloc(curr_block),
+                   (void *)get_prev_free_block(curr_block),
+                   (void *)get_next_free_block(curr_block), msg);
         }
     }
+
     printf("\n");
 }
 
@@ -569,6 +572,7 @@ static block_t *coalesce_block(block_t *block) {
     dbg_requires(get_size(block) != 0);
     dbg_requires(get_alloc(block) == false);
 
+    print_heap("");
     block_t *prev_block = find_prev(block);
     block_t *next_block = find_next(block);
     size_t curr_block_size = get_size(block);
@@ -594,12 +598,14 @@ static block_t *coalesce_block(block_t *block) {
              (get_alloc(prev_block) == false && prev_block == block)) &&
             (get_alloc(next_block) == false && next_block != block)) {
             write_block(block, curr_block_size + next_block_size, false);
+            write_next_pointer(block, get_next_free_block(next_block));
         }
 
         // case 3
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
                  (get_alloc(next_block) == true)) {
             write_block(prev_block, curr_block_size + prev_block_size, false);
+            write_next_pointer(prev_block, get_next_free_block(block));
             block = prev_block;
         }
 
@@ -609,9 +615,12 @@ static block_t *coalesce_block(block_t *block) {
             write_block(prev_block,
                         curr_block_size + prev_block_size + next_block_size,
                         false);
+            write_next_pointer(prev_block, get_next_free_block(next_block));
             block = prev_block;
         }
     }
+
+    print_heap("");
     dbg_assert(check_header_footer(block));
     dbg_assert(mm_checkheap(__LINE__));
     return block;
@@ -691,14 +700,27 @@ static void split_block(block_t *block, size_t asize) {
         block_t *prev_free_block = prev_next_pointers->prev;
         block_t *next_free_block = prev_next_pointers->next;
 
-        block_t *block_next;
+        block_t *block_split;
         write_block(block, asize, true);
 
-        block_next = find_next(block);
-        write_block(block_next, block_size - asize, false);
-        prev_next_pointers = get_free_block_contents(block_next);
-        prev_next_pointers->next = next_free_block;
+        block_split = find_next(block);
+        write_block(block_split, block_size - asize, false);
+
+        freed_block_contents_t *prev_next_pointers_splitblock =
+            get_free_block_contents(block_split);
+        prev_next_pointers_splitblock->next = next_free_block;
         prev_next_pointers->prev = prev_free_block;
+
+        if (prev_free_block != NULL) {
+            freed_block_contents_t *prev_next_pointers_prevblock =
+                get_free_block_contents(prev_free_block);
+            prev_next_pointers_prevblock->next = block_split;
+        }
+        if (next_free_block != NULL) {
+            freed_block_contents_t *prev_next_pointers_nextblock =
+                get_free_block_contents(next_free_block);
+            prev_next_pointers_nextblock->prev = block_split;
+        }
     }
 
     dbg_ensures(get_alloc(block));
@@ -716,16 +738,15 @@ static void split_block(block_t *block, size_t asize) {
  * @return
  */
 static block_t *find_fit(size_t asize) {
-    print_heap();
+    print_heap("");
     block_t *block = free_list_start;
     freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
 
     for (; block != NULL; block = (prev_next_pointers->next)) {
         if (!(get_alloc(block)) && (asize <= get_size(block))) {
-            write_next_pointer(block, NULL);
-            write_prev_pointer(block, NULL);
             return block;
         }
+        prev_next_pointers = get_free_block_contents(block);
     }
     return NULL; // no fit found
 }
@@ -772,6 +793,16 @@ bool mm_checkheap(int line) {
             return false;
         } else
             prev_alloc = get_alloc(curr_block);
+    }
+
+    block_t *block = free_list_start;
+    freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
+
+    print_heap("Check free list");
+    for (; block != NULL; block = (prev_next_pointers->next)) {
+        if (get_alloc(block) == 1)
+            return false;
+        prev_next_pointers = get_free_block_contents(block);
     }
 
     return true;
@@ -871,9 +902,13 @@ void *malloc(size_t size) {
     // Try to split the block if too large
     split_block(block, asize);
 
+    write_next_pointer(block, NULL);
+    write_prev_pointer(block, NULL);
+
     bp = header_to_payload(block);
 
     dbg_ensures(mm_checkheap(__LINE__));
+    print_heap("");
     return bp;
 }
 
