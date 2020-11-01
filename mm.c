@@ -164,6 +164,8 @@ static block_t *free_list_end = NULL;
  * ---------------------------------------------------------------------------
  */
 
+static void print_heap(char *msg);
+
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
     dbg_assert(block != NULL);
     block_contents_t *block_payload_start =
@@ -224,10 +226,16 @@ static block_t *remove_free_block(block_t *block) {
     block_t *prev_block = get_prev_free_block(block);
     block_t *next_block = get_next_free_block(block);
 
-    if (prev_block != NULL)
+    if (prev_block != NULL) {
         write_next_pointer(prev_block, next_block);
-    if (next_block != NULL)
+        dbg_printheap("wrote prev_block's next pointer");
+    }
+    if (next_block != NULL) {
         write_prev_pointer(next_block, prev_block);
+        dbg_printheap("wrote next_block's prev pointer");
+    }
+    if (prev_block == NULL && next_block == NULL)
+        free_list_start = NULL;
 
     return block;
 }
@@ -410,8 +418,10 @@ static void write_block(block_t *block, size_t size, bool alloc) {
 
     if (alloc == false) {
         // write next and prev pointers
-        // if (free_list_start != block)
-        write_next_pointer(block, free_list_start);
+        if (free_list_start != block)
+            write_next_pointer(block, free_list_start);
+        else
+            write_next_pointer(block, get_next_free_block(block));
         write_prev_pointer(block, NULL);
         if (free_list_start != NULL && get_alloc(free_list_start) == false &&
             free_list_start != block)
@@ -622,7 +632,7 @@ static block_t *coalesce_block(block_t *block) {
     dbg_requires(get_size(block) != 0);
     dbg_requires(get_alloc(block) == false);
 
-    print_heap("");
+    dbg_printheap("");
     block_t *prev_block = find_prev(block);
     block_t *next_block = find_next(block);
     size_t curr_block_size = get_size(block);
@@ -647,13 +657,14 @@ static block_t *coalesce_block(block_t *block) {
         if ((get_alloc(prev_block) == true ||
              (get_alloc(prev_block) == false && prev_block == block)) &&
             (get_alloc(next_block) == false && next_block != block)) {
-
-            remove_free_block(block);
-            print_heap("remove curr block");
+            if (block != free_list_start) {
+                remove_free_block(block);
+                dbg_printheap("remove curr block");
+            }
             write_block(block, curr_block_size + next_block_size, false);
-            print_heap("write new block");
+            dbg_printheap("write new block");
             remove_free_block(next_block);
-            print_heap("remove next block");
+            dbg_printheap("remove next block");
 
             // block_t *prev_of_next_block =
             // get_prev_free_block(next_block); if (prev_of_next_block !=
@@ -663,20 +674,24 @@ static block_t *coalesce_block(block_t *block) {
             // if (get_next_free_block(next_block) != NULL)
             //     write_prev_pointer(get_next_free_block(next_block),
             //                        prev_of_next_block);
-            printf("case 2");
+            dbg_printf("case 2");
         }
 
         // case 3
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
                  (get_alloc(next_block) == true)) {
-            write_block(prev_block, curr_block_size + prev_block_size, false);
-            if (get_next_free_block(block) != prev_block) {
-                write_next_pointer(prev_block, get_next_free_block(block));
-            } else {
-                write_next_pointer(prev_block, NULL);
+            if (prev_block != free_list_start) {
+                remove_free_block(prev_block);
+                dbg_printheap("remove prev block");
             }
+            write_block(prev_block, curr_block_size + prev_block_size, false);
+            dbg_printheap("write new block");
+
+            remove_free_block(block);
+            dbg_printheap("rem curr block");
+
             block = prev_block;
-            printf("case 3");
+            dbg_printf("case 3");
         }
 
         // case 4
@@ -684,37 +699,37 @@ static block_t *coalesce_block(block_t *block) {
                  (get_alloc(next_block) == false)) {
 
             remove_free_block(prev_block);
-            print_heap("remove block 68");
+            dbg_printheap("remove block 68");
 
             write_block(prev_block,
                         curr_block_size + prev_block_size + next_block_size,
                         false);
-            print_heap("write new combined block");
+            dbg_printheap("write new combined block");
             remove_free_block(next_block);
-            print_heap("remove next block");
+            dbg_printheap("remove next block");
             remove_free_block(block);
-            print_heap("remove block");
+            dbg_printheap("remove block");
 
-            // print_heap("");
+            // dbg_printheap("");
             // write_next_pointer(prev_block, find_next(next_block));
-            // print_heap("");
+            // dbg_printheap("");
             // block_t *prev_of_next_block = get_prev_free_block(next_block);
             // if (prev_of_next_block != NULL && prev_of_next_block !=
             // prev_block)
             //     write_next_pointer(get_prev_free_block(next_block),
             //                        get_next_free_block(next_block));
-            // print_heap("");
+            // dbg_printheap("");
             // if (get_next_free_block(next_block) != NULL)
             //     write_prev_pointer(get_next_free_block(next_block),
             //                        prev_of_next_block);
-            // print_heap("");
+            // dbg_printheap("");
 
             block = prev_block;
-            printf("case 4");
+            dbg_printf("case 4");
         }
     }
 
-    print_heap("");
+    dbg_printheap("");
     dbg_assert(check_header_footer(block));
     dbg_assert(mm_checkheap(__LINE__));
     return block;
@@ -839,7 +854,7 @@ static void split_block(block_t *block, size_t asize) {
  * @return
  */
 static block_t *find_fit(size_t asize) {
-    print_heap("");
+    dbg_printheap("");
     block_t *block = free_list_start;
     freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
 
@@ -909,7 +924,7 @@ bool mm_checkheap(int line) {
     block_t *block = free_list_start;
     freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
 
-    print_heap("Check free list");
+    dbg_printheap("Check free list");
     for (; block != NULL; block = (prev_next_pointers->next)) {
         if (get_alloc(block) == 1) {
             print_error("Free list has allocated blocks");
@@ -1027,7 +1042,7 @@ void *malloc(size_t size) {
     bp = header_to_payload(block);
 
     dbg_ensures(mm_checkheap(__LINE__));
-    print_heap("");
+    dbg_printheap("");
     return bp;
 }
 
