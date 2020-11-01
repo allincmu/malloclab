@@ -535,6 +535,14 @@ static bool is_acyclic() {
     return false;
 }
 
+static void remove_free_block(block_t *block) {
+    block_t *prev_block = get_prev_free_block(block);
+    block_t *next_block = get_next_free_block(block);
+
+    write_next_pointer(prev_block, next_block);
+    write_prev_pointer(next_block, prev_block);
+}
+
 static void print_heap(char *msg) {
     for (block_t *curr_block = heap_start; get_size(curr_block) > 0;
          curr_block = find_next(curr_block)) {
@@ -663,6 +671,8 @@ static block_t *coalesce_block(block_t *block) {
             write_block(prev_block,
                         curr_block_size + prev_block_size + next_block_size,
                         false);
+
+            
             print_heap("");
             write_next_pointer(prev_block, find_next(next_block));
             print_heap("");
