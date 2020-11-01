@@ -165,6 +165,7 @@ static block_t *free_list_end = NULL;
  */
 
 static void print_heap(char *msg);
+static bool block_is_alligned(block_t *curr_block);
 
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
     dbg_assert(block != NULL);
@@ -223,6 +224,7 @@ static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
 }
 
 static block_t *remove_free_block(block_t *block) {
+    dbg_requires(block_is_alligned(block));
     block_t *prev_block = get_prev_free_block(block);
     block_t *next_block = get_next_free_block(block);
 
@@ -234,8 +236,14 @@ static block_t *remove_free_block(block_t *block) {
         write_prev_pointer(next_block, prev_block);
         dbg_printheap("wrote next_block's prev pointer");
     }
+
     if (prev_block == NULL && next_block == NULL)
         free_list_start = NULL;
+    else if (block == free_list_start)
+        free_list_start = next_block;
+
+    // write_next_pointer(block, NULL);
+    // write_prev_pointer(block, NULL);
 
     return block;
 }
@@ -412,6 +420,11 @@ static void write_epilogue(block_t *block) {
 static void write_block(block_t *block, size_t size, bool alloc) {
     dbg_requires(block != NULL);
     dbg_requires(size > 0);
+
+    if (alloc == true && get_alloc(block) == false) {
+        remove_free_block(block);
+    }
+
     block->header = pack(size, alloc);
     word_t *footerp = header_to_footer(block);
     *footerp = pack(size, alloc);
@@ -571,7 +584,6 @@ static void print_heap(char *msg) {
                    (void *)get_next_free_block(curr_block), msg);
         }
     }
-
     printf("\n");
 }
 
@@ -710,20 +722,6 @@ static block_t *coalesce_block(block_t *block) {
             remove_free_block(block);
             dbg_printheap("remove block");
 
-            // dbg_printheap("");
-            // write_next_pointer(prev_block, find_next(next_block));
-            // dbg_printheap("");
-            // block_t *prev_of_next_block = get_prev_free_block(next_block);
-            // if (prev_of_next_block != NULL && prev_of_next_block !=
-            // prev_block)
-            //     write_next_pointer(get_prev_free_block(next_block),
-            //                        get_next_free_block(next_block));
-            // dbg_printheap("");
-            // if (get_next_free_block(next_block) != NULL)
-            //     write_prev_pointer(get_next_free_block(next_block),
-            //                        prev_of_next_block);
-            // dbg_printheap("");
-
             block = prev_block;
             dbg_printf("case 4");
         }
@@ -808,7 +806,7 @@ static void split_block(block_t *block, size_t asize) {
             get_free_block_contents(block);
         block_t *prev_free_block = prev_next_pointers->prev;
         block_t *next_free_block = prev_next_pointers->next;
-        block_t *orig_free_list_start = free_list_start;
+        // block_t *orig_free_list_start = free_list_start;
 
         block_t *block_split;
         write_block(block, asize, true);
@@ -816,27 +814,31 @@ static void split_block(block_t *block, size_t asize) {
         block_split = find_next(block);
         write_block(block_split, block_size - asize, false);
 
+        // insert the 2nd half of the orig block back into the list
         freed_block_contents_t *prev_next_pointers_splitblock =
             get_free_block_contents(block_split);
         prev_next_pointers_splitblock->next = next_free_block;
         prev_next_pointers_splitblock->prev = prev_free_block;
 
+        // make previous block next ptr point to split block
         if (prev_free_block != NULL) {
             freed_block_contents_t *prev_next_pointers_prevblock =
                 get_free_block_contents(prev_free_block);
             prev_next_pointers_prevblock->next = block_split;
         }
+
+        // make next block point previous ptr to split block
         if (next_free_block != NULL) {
             freed_block_contents_t *prev_next_pointers_nextblock =
                 get_free_block_contents(next_free_block);
             prev_next_pointers_nextblock->prev = block_split;
         }
 
-        // reset the beginning of free list
-        if (orig_free_list_start != block) {
-            free_list_start = orig_free_list_start;
-            write_prev_pointer(free_list_start, NULL);
-        }
+        // // reset the beginning of free list
+        // if (orig_free_list_start != block) {
+        //     free_list_start = orig_free_list_start;
+        //     write_prev_pointer(free_list_start, NULL);
+        // }
     }
 
     dbg_ensures(get_alloc(block));
@@ -1036,8 +1038,9 @@ void *malloc(size_t size) {
     // Try to split the block if too large
     split_block(block, asize);
 
-    write_next_pointer(block, NULL);
-    write_prev_pointer(block, NULL);
+    // // remove_free_block(block);
+    // write_next_pointer(block, NULL);
+    // write_prev_pointer(block, NULL);
 
     bp = header_to_payload(block);
 
