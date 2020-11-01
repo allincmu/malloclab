@@ -802,10 +802,11 @@ static void split_block(block_t *block, size_t asize) {
 
     if ((block_size - asize) >= min_block_size) {
 
-        freed_block_contents_t *prev_next_pointers =
-            get_free_block_contents(block);
-        block_t *prev_free_block = prev_next_pointers->prev;
-        block_t *next_free_block = prev_next_pointers->next;
+        // freed_block_contents_t *prev_next_pointers =
+        //     get_free_block_contents(block);
+        // block_t *prev_free_block = prev_next_pointers->prev;
+        // block_t *next_free_block = prev_next_pointers->next;
+
         // block_t *orig_free_list_start = free_list_start;
 
         block_t *block_split;
@@ -814,25 +815,25 @@ static void split_block(block_t *block, size_t asize) {
         block_split = find_next(block);
         write_block(block_split, block_size - asize, false);
 
-        // insert the 2nd half of the orig block back into the list
-        freed_block_contents_t *prev_next_pointers_splitblock =
-            get_free_block_contents(block_split);
-        prev_next_pointers_splitblock->next = next_free_block;
-        prev_next_pointers_splitblock->prev = prev_free_block;
+        // // insert the 2nd half of the orig block back into the list
+        // freed_block_contents_t *prev_next_pointers_splitblock =
+        //     get_free_block_contents(block_split);
+        // prev_next_pointers_splitblock->next = next_free_block;
+        // prev_next_pointers_splitblock->prev = prev_free_block;
 
-        // make previous block next ptr point to split block
-        if (prev_free_block != NULL) {
-            freed_block_contents_t *prev_next_pointers_prevblock =
-                get_free_block_contents(prev_free_block);
-            prev_next_pointers_prevblock->next = block_split;
-        }
+        // // make previous block next ptr point to split block
+        // if (prev_free_block != NULL) {
+        //     freed_block_contents_t *prev_next_pointers_prevblock =
+        //         get_free_block_contents(prev_free_block);
+        //     prev_next_pointers_prevblock->next = block_split;
+        // }
 
-        // make next block point previous ptr to split block
-        if (next_free_block != NULL) {
-            freed_block_contents_t *prev_next_pointers_nextblock =
-                get_free_block_contents(next_free_block);
-            prev_next_pointers_nextblock->prev = block_split;
-        }
+        // // make next block point previous ptr to split block
+        // if (next_free_block != NULL) {
+        //     freed_block_contents_t *prev_next_pointers_nextblock =
+        //         get_free_block_contents(next_free_block);
+        //     prev_next_pointers_nextblock->prev = block_split;
+        // }
 
         // // reset the beginning of free list
         // if (orig_free_list_start != block) {
@@ -1039,8 +1040,8 @@ void *malloc(size_t size) {
     split_block(block, asize);
 
     // // remove_free_block(block);
-    // write_next_pointer(block, NULL);
-    // write_prev_pointer(block, NULL);
+    write_next_pointer(block, NULL);
+    write_prev_pointer(block, NULL);
 
     bp = header_to_payload(block);
 
