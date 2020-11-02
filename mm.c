@@ -283,7 +283,7 @@ static void write_free_list_start(size_t size, block_t *block) {
 }
 
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
-    dbg_assert(block != NULL);
+
     block_contents_t *block_payload_start =
         (block_contents_t *)&(block->payload_contents);
     freed_block_contents_t *prev_next_pointers =
@@ -662,7 +662,7 @@ static bool block_is_alligned(block_t *curr_block) {
  */
 static bool block_within_heap(block_t *curr_block) {
     if ((void *)curr_block < mem_heap_lo() ||
-        (void *)curr_block > mem_heap_hi()) {
+        (void *)curr_block > mem_heap_hi() || curr_block == NULL) {
         return false;
     }
     return true;
@@ -1007,40 +1007,64 @@ static block_t *find_fit(size_t asize) {
 /**
  * @brief checks to make sure the heap is valid
  *
- * <What does this function do?>
- * <What are the function's arguments?>
- * <What is the function's return value?>
- * <Are there any preconditions or postconditions?>
+ * Heap:
+ * ensure heap has an epilogue and a prologue
+ * ensure blocks is properly alligned to 16 bytes
+ * check to make sure the block is between block boundaries
+ * check to make sure headers and footers are the same
+ * check to make sure coalesing is correct i.e. no free blocks next to each
+ * other
+ *
+ * Free lists:
+ * make sure free lists has no cycles
+ * check to make sure there are no allocated blocks in the free list
+ * check consistency of the current block's next pointer
+ * ensure that the number of blocks in the free list is the same as the number
+ * in the heap ensure all blocks are within the right bucket size range.
  *
  * @param[in] line
- * @return bool true if the heap is correct, false if there are problems with the heap.
+ * @return bool true if the heap is correct, false if there are problems with
+ * the heap.
  */
 bool mm_checkheap(int line) {
 
+    // ensure heap has an epilogue and a prologue
     if (!has_epilogue_prologue()) {
         char *error_msg = "No prologue or epilogue.";
         print_error(error_msg);
         return false;
     }
 
+    // sentry variable to make sure coalesing does not fail on the first block
+    // in the heap
     unsigned short prev_alloc = 1;
+
+    // tally the number of free blocks in the heap to compare to number in free
+    // lists
     uint64_t num_free_heap_blocks = 0;
+
     for (block_t *curr_block = heap_start; get_size(curr_block) > 0;
          curr_block = find_next(curr_block)) {
+
+        // ensure block is properly alligned to 16 bytes
         if (!block_is_alligned(curr_block)) {
             print_error("Blocks not alligned.");
             return false;
         }
+
+        // check to make sure the block is between block boundaries
         if (!block_within_heap(curr_block)) {
             print_error("Block not within block boundaries.");
             return false;
         }
+
+        // check to make sure headers and footers are the same
         if (!check_header_footer(curr_block)) {
             return false;
         }
 
-        // check to make sure coalesing is correct i.e. no free blocks next to
-        // each other
+        // check to make sure coalesing is correct
+        // i.e. no free blocks next to each other
         if (get_alloc(curr_block) == 0 && prev_alloc == 0) {
             print_error(
                 "Coalesing incorrect. Two free consecutive blocks in heap.");
@@ -1048,15 +1072,19 @@ bool mm_checkheap(int line) {
         } else
             prev_alloc = get_alloc(curr_block);
 
+        // count free blocks in heap to compare to those in the free lists
         if ((get_alloc(curr_block) == 0))
             num_free_heap_blocks++;
     }
 
+    // counts the number of free blocks in the heap
     uint64_t num_free_list_blocks = 0;
 
+    // iterate through each free list
     for (int i = 0; i < max_free_lists; i++) {
         block_t *free_list_start = free_lists[i];
 
+        // make sure free list has no cycles
         if (!is_acyclic(free_list_start)) {
             print_error("free list has cycle.");
             return false;
@@ -1064,6 +1092,7 @@ bool mm_checkheap(int line) {
 
         if (free_list_start != NULL) {
 
+            // iterate through each block in the free list
             block_t *block = free_list_start;
             freed_block_contents_t *prev_next_pointers =
                 get_free_block_contents(block);
@@ -1071,39 +1100,60 @@ bool mm_checkheap(int line) {
             dbg_printheap("Check free list");
             for (; block != NULL; block = (prev_next_pointers->next)) {
 
-                // check to make sure there are no allocated blocks in the heap
+                // check to make sure there are no allocated blocks in the free
+                // list
                 if (get_alloc(block) == 1) {
                     print_error("Free list has allocated blocks");
                     print_free_list("Free List");
                     return false;
                 }
 
-                // check consistency of the current block's  next pointer 
+                // check consistency of the current block's next pointer
                 block_t *next_block = get_next_free_block(block);
-                if (get_next_free_block(block) != NULL)
-                {
-                    if (get_prev_free_block(next_block) != block){
-                        print_error("Block next pointer is not consitent with the next block's previous pointer");
+                if (get_next_free_block(block) != NULL) {
+                    if (get_prev_free_block(next_block) != block) {
+                        print_error("Block next pointer is not consitent with "
+                                    "the next block's previous pointer");
                         return false;
                     }
                 }
 
-                // check consistency of the current block's  previous pointer 
+                // check consistency of the current block's  previous pointer
                 block_t *prev_block = get_prev_free_block(block);
-                if (get_next_free_block(block) != NULL)
-                {
-                    if (get_next_free_block(prev_block) != block){
-                        print_error("Block prev pointer is not consitent with the previous block's next pointer");
+                if (get_next_free_block(block) != NULL) {
+                    if (get_next_free_block(prev_block) != block) {
+                        print_error("Block prev pointer is not consitent with "
+                                    "the previous block's next pointer");
                         return false;
                     }
+                }
+
+                // check that all free list pointers are between mem_heap_lo and
+                // mem_heap_hi
+                if (!block_within_heap(next_block) ||
+                    !block_within_heap(prev_block) ||
+                    !block_within_heap(block)) {
+                    print_error("Block prev pointer or next pointer points "
+                                "outside of the heap");
+                    return false;
+                }
+
+                // check block is in the right bucket
+                if (get_free_list_index(get_size(block)) != i) {
+                    print_error("Block in incorrect bucket");
+                    return false;
                 }
 
                 prev_next_pointers = get_free_block_contents(block);
-                num_free_list_blocks++; // count total blocks in the free lists to compare with total free blocks in the heap
+                num_free_list_blocks++; // count total blocks in the free lists
+                                        // to compare with total free blocks in
+                                        // the heap
             }
         }
     }
 
+    // check the number of free blocks in the heap and in the free lists are the
+    // same
     if (num_free_heap_blocks != num_free_list_blocks) {
         print_error("Number of block in free list incorrect");
         return false;
