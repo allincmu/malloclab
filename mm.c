@@ -137,24 +137,39 @@ typedef struct block {
 /** @brief Pointer to first block in the heap */
 static block_t *heap_start = NULL;
 
-// static free_list_t *freed_blocks = NULL;
+/** @brief the number of free lists */
+#define max_free_lists 15
 
-/** @brief Pointer to first freed block in the heap */
-static block_t *free_list_start = NULL;
-/** @brief Pointer to last freed block in the heap */
-static block_t *free_list_end = NULL;
+/** @brief Pointer to first freed block in each seg list */
+static block_t *free_lists[max_free_lists];
+
+#define free_list_0_max_size 16
+#define free_list_1_max_size 32
+#define free_list_2_max_size 48
+#define free_list_3_max_size 64
+#define free_list_4_max_size 128
+#define free_list_5_max_size 256
+#define free_list_6_max_size 512
+#define free_list_7_max_size 768
+#define free_list_8_max_size 1024
+#define free_list_9_max_size 2048
+#define free_list_10_max_size 4096
+#define free_list_11_max_size 8192
+#define free_list_12_max_size 16384
+#define free_list_13_max_size 32768
+#define free_list_14_max_size 577536
 
 /*
  *****************************************************************************
- * The functions below are short wrapper functions to perform                *
- * bit manipulation, pointer arithmetic, and other helper operations.        *
+ * The functions below are short wrapper functions to perform * bit
+ *manipulation, pointer arithmetic, and other helper operations.        *
  *                                                                           *
- * We've given you the function header comments for the functions below      *
- * to help you understand how this baseline code works.                      *
+ * We've given you the function header comments for the functions below * to
+ *help you understand how this baseline code works.                      *
  *                                                                           *
- * Note that these function header comments are short since the functions    *
- * they are describing are short as well; you will need to provide           *
- * adequate details for the functions that you write yourself!               *
+ * Note that these function header comments are short since the functions *
+ * they are describing are short as well; you will need to provide *
+ * adequate details for the functions that you write yourself! *
  *****************************************************************************
  */
 
@@ -166,6 +181,106 @@ static block_t *free_list_end = NULL;
 
 static void print_heap(char *msg);
 static bool block_is_alligned(block_t *curr_block);
+static size_t get_size(block_t *block);
+
+static block_t *get_free_list(size_t size) {
+    if (size <= free_list_0_max_size)
+        return free_lists[0];
+    else if (size <= free_list_1_max_size)
+        return free_lists[1];
+    else if (size <= free_list_2_max_size)
+        return free_lists[2];
+    else if (size <= free_list_3_max_size)
+        return free_lists[3];
+    else if (size <= free_list_4_max_size)
+        return free_lists[4];
+    else if (size <= free_list_5_max_size)
+        return free_lists[5];
+    else if (size <= free_list_6_max_size)
+        return free_lists[6];
+    else if (size <= free_list_7_max_size)
+        return free_lists[7];
+    else if (size <= free_list_8_max_size)
+        return free_lists[8];
+    else if (size <= free_list_9_max_size)
+        return free_lists[9];
+    else if (size <= free_list_10_max_size)
+        return free_lists[10];
+    else if (size <= free_list_11_max_size)
+        return free_lists[11];
+    else if (size <= free_list_12_max_size)
+        return free_lists[12];
+    else if (size <= free_list_13_max_size)
+        return free_lists[13];
+    else
+        return free_lists[14];
+}
+
+static int get_free_list_index(size_t size) {
+    if (size <= free_list_0_max_size)
+        return 0;
+    else if (size <= free_list_1_max_size)
+        return 1;
+    else if (size <= free_list_2_max_size)
+        return 2;
+    else if (size <= free_list_3_max_size)
+        return 3;
+    else if (size <= free_list_4_max_size)
+        return 4;
+    else if (size <= free_list_5_max_size)
+        return 5;
+    else if (size <= free_list_6_max_size)
+        return 6;
+    else if (size <= free_list_7_max_size)
+        return 7;
+    else if (size <= free_list_8_max_size)
+        return 8;
+    else if (size <= free_list_9_max_size)
+        return 9;
+    else if (size <= free_list_10_max_size)
+        return 10;
+    else if (size <= free_list_11_max_size)
+        return 11;
+    else if (size <= free_list_12_max_size)
+        return 12;
+    else if (size <= free_list_13_max_size)
+        return 13;
+    else
+        return 14;
+}
+
+static void write_free_list_start(size_t size, block_t *block) {
+    if (size <= free_list_0_max_size)
+        free_lists[0] = block;
+    else if (size <= free_list_1_max_size)
+        free_lists[1] = block;
+    else if (size <= free_list_2_max_size)
+        free_lists[2] = block;
+    else if (size <= free_list_3_max_size)
+        free_lists[3] = block;
+    else if (size <= free_list_4_max_size)
+        free_lists[4] = block;
+    else if (size <= free_list_5_max_size)
+        free_lists[5] = block;
+    else if (size <= free_list_6_max_size)
+        free_lists[6] = block;
+    else if (size <= free_list_7_max_size)
+        free_lists[7] = block;
+    else if (size <= free_list_8_max_size)
+        free_lists[8] = block;
+    else if (size <= free_list_9_max_size)
+        free_lists[9] = block;
+    else if (size <= free_list_10_max_size)
+        free_lists[10] = block;
+    else if (size <= free_list_11_max_size)
+        free_lists[11] = block;
+    else if (size <= free_list_12_max_size)
+        free_lists[12] = block;
+    else if (size <= free_list_13_max_size)
+        free_lists[13] = block;
+    else
+        free_lists[14] = block;
+}
 
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
     dbg_assert(block != NULL);
@@ -187,7 +302,8 @@ static block_t *get_next_free_block(block_t *block) {
 }
 
 // from: https://www.cs.cmu.edu/~15122/handouts/10-linkedlist.pdf
-static bool is_acyclic() {
+static bool is_acyclic(block_t *free_list_start) {
+
     if (free_list_start == NULL)
         return true;
     block_t *h = get_next_free_block(free_list_start); // hare
@@ -224,6 +340,9 @@ static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
 }
 
 static block_t *remove_free_block(block_t *block) {
+
+    block_t *free_list_start = get_free_list(get_size(block));
+
     dbg_requires(block_is_alligned(block));
     block_t *prev_block = get_prev_free_block(block);
     block_t *next_block = get_next_free_block(block);
@@ -238,9 +357,9 @@ static block_t *remove_free_block(block_t *block) {
     }
 
     if (prev_block == NULL && next_block == NULL)
-        free_list_start = NULL;
+        write_free_list_start(get_size(block), NULL);
     else if (block == free_list_start)
-        free_list_start = next_block;
+        write_free_list_start(get_size(block), next_block);
 
     // write_next_pointer(block, NULL);
     // write_prev_pointer(block, NULL);
@@ -429,6 +548,8 @@ static void write_block(block_t *block, size_t size, bool alloc) {
     word_t *footerp = header_to_footer(block);
     *footerp = pack(size, alloc);
 
+    block_t *free_list_start = get_free_list(get_size(block));
+
     if (alloc == false) {
         // write next and prev pointers
         if (free_list_start != block)
@@ -439,7 +560,7 @@ static void write_block(block_t *block, size_t size, bool alloc) {
         if (free_list_start != NULL && get_alloc(free_list_start) == false &&
             free_list_start != block)
             write_prev_pointer(free_list_start, block);
-        free_list_start = block;
+        write_free_list_start(get_size(block), block);
     }
 
     if (get_size(block) != extract_size(*header_to_footer(block))) {
@@ -588,17 +709,24 @@ static void print_heap(char *msg) {
 }
 
 static void print_free_list(char *msg) {
+    for (int i = 0; i < max_free_lists; i++) {
 
-    block_t *block = free_list_start;
-    freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
+        block_t *free_list_start = free_lists[i];
+        if (free_list_start != NULL) {
+            block_t *block = free_list_start;
+            freed_block_contents_t *prev_next_pointers =
+                get_free_block_contents(block);
 
-    for (; block != NULL; block = (prev_next_pointers->next)) {
-        printf("addr: %p \t size: %zu \t alloc: %d \t prev: %p \t next: %p "
-               "\t msg: %s \n",
-               block, get_size(block), get_alloc(block),
-               (void *)get_prev_free_block(block),
-               (void *)get_next_free_block(block), msg);
-        prev_next_pointers = get_free_block_contents(block);
+            for (; block != NULL; block = (prev_next_pointers->next)) {
+                printf("addr: %p \t size: %zu \t alloc: %d \t prev: %p \t "
+                       "next: %p "
+                       "\t msg: %s \n",
+                       block, get_size(block), get_alloc(block),
+                       (void *)get_prev_free_block(block),
+                       (void *)get_next_free_block(block), msg);
+                prev_next_pointers = get_free_block_contents(block);
+            }
+        }
     }
 
     printf("\n");
@@ -669,6 +797,10 @@ static block_t *coalesce_block(block_t *block) {
         if ((get_alloc(prev_block) == true ||
              (get_alloc(prev_block) == false && prev_block == block)) &&
             (get_alloc(next_block) == false && next_block != block)) {
+
+            block_t *free_list_start =
+                get_free_list(curr_block_size + next_block_size);
+
             if (block != free_list_start) {
                 remove_free_block(block);
                 dbg_printheap("remove curr block");
@@ -692,6 +824,10 @@ static block_t *coalesce_block(block_t *block) {
         // case 3
         else if ((get_alloc(prev_block) == false && prev_block != block) &&
                  (get_alloc(next_block) == true)) {
+
+            block_t *free_list_start =
+                get_free_list(curr_block_size + prev_block_size);
+
             if (prev_block != free_list_start) {
                 remove_free_block(prev_block);
                 dbg_printheap("remove prev block");
@@ -764,13 +900,13 @@ static block_t *extend_heap(size_t size) {
     block_t *block = payload_to_header(bp);
     write_block(block, size, false);
 
-    // if there are no blocks in the heap, set free_list_start to this block
-    if (free_list_start == NULL) {
-        free_list_start = block;
-    }
+    // if there are no free blocks in the free list, set free_list_start to this
+    // block
 
-    // set free_list_end to the newly allocated block
-    free_list_end = block;
+    block_t *free_list_start = get_free_list(get_size(block));
+    if (free_list_start == NULL) {
+        write_free_list_start(get_size(block), block);
+    }
 
     // Create new epilogue header
     block_t *block_next = find_next(block);
@@ -802,44 +938,11 @@ static void split_block(block_t *block, size_t asize) {
 
     if ((block_size - asize) >= min_block_size) {
 
-        // freed_block_contents_t *prev_next_pointers =
-        //     get_free_block_contents(block);
-        // block_t *prev_free_block = prev_next_pointers->prev;
-        // block_t *next_free_block = prev_next_pointers->next;
-
-        // block_t *orig_free_list_start = free_list_start;
-
         block_t *block_split;
         write_block(block, asize, true);
 
         block_split = find_next(block);
         write_block(block_split, block_size - asize, false);
-
-        // // insert the 2nd half of the orig block back into the list
-        // freed_block_contents_t *prev_next_pointers_splitblock =
-        //     get_free_block_contents(block_split);
-        // prev_next_pointers_splitblock->next = next_free_block;
-        // prev_next_pointers_splitblock->prev = prev_free_block;
-
-        // // make previous block next ptr point to split block
-        // if (prev_free_block != NULL) {
-        //     freed_block_contents_t *prev_next_pointers_prevblock =
-        //         get_free_block_contents(prev_free_block);
-        //     prev_next_pointers_prevblock->next = block_split;
-        // }
-
-        // // make next block point previous ptr to split block
-        // if (next_free_block != NULL) {
-        //     freed_block_contents_t *prev_next_pointers_nextblock =
-        //         get_free_block_contents(next_free_block);
-        //     prev_next_pointers_nextblock->prev = block_split;
-        // }
-
-        // // reset the beginning of free list
-        // if (orig_free_list_start != block) {
-        //     free_list_start = orig_free_list_start;
-        //     write_prev_pointer(free_list_start, NULL);
-        // }
     }
 
     dbg_ensures(get_alloc(block));
@@ -858,20 +961,51 @@ static void split_block(block_t *block, size_t asize) {
  */
 static block_t *find_fit(size_t asize) {
     dbg_printheap("");
-    block_t *block = free_list_start;
-    freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
+    int free_list_index = get_free_list_index(asize);
+    block_t *possible_block = NULL;
+    for (; free_list_index < max_free_lists; free_list_index++) {
+        block_t *free_list_start = free_lists[free_list_index];
+        if (free_list_start != NULL) {
+            block_t *block = free_list_start;
+            freed_block_contents_t *prev_next_pointers =
+                get_free_block_contents(block);
 
-    for (; block != NULL; block = (prev_next_pointers->next)) {
-        if (!(get_alloc(block)) && (asize <= get_size(block))) {
-            return block;
+            for (; block != NULL; block = (prev_next_pointers->next)) {
+                if (!(get_alloc(block)) && (asize <= get_size(block))) {
+
+                    return block; // comment this out for final
+
+                    // if perfect fit return
+                    if (get_size(block) == asize)
+                        return block;
+
+                    // the block works and there wasn't
+                    // another block that works, save it
+                    else if (asize <= get_size(block) &&
+                             possible_block == NULL) {
+                        possible_block = block;
+                    }
+
+                    // the block works and there was another
+                    // block that works, return the smaller one
+                    else if (get_size(block) == asize &&
+                             possible_block != NULL) {
+                        if (get_size(block) <= get_size(possible_block))
+                            return block;
+                        else
+                            return possible_block;
+                    }
+                }
+                prev_next_pointers = get_free_block_contents(block);
+            }
         }
-        prev_next_pointers = get_free_block_contents(block);
     }
-    return NULL; // no fit found
+    return possible_block; // no fit found return the only block that fit or
+                           // null
 }
 
 /**
- * @brief
+ * @brief checks to make sure the heap is valid
  *
  * <What does this function do?>
  * <What are the function's arguments?>
@@ -879,7 +1013,7 @@ static block_t *find_fit(size_t asize) {
  * <Are there any preconditions or postconditions?>
  *
  * @param[in] line
- * @return
+ * @return bool true if the heap is correct, false if there are problems with the heap.
  */
 bool mm_checkheap(int line) {
 
@@ -918,24 +1052,56 @@ bool mm_checkheap(int line) {
             num_free_heap_blocks++;
     }
 
-    if (!is_acyclic()) {
-        print_error("free list has cycle.");
-        return false;
-    }
-
     uint64_t num_free_list_blocks = 0;
-    block_t *block = free_list_start;
-    freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
 
-    dbg_printheap("Check free list");
-    for (; block != NULL; block = (prev_next_pointers->next)) {
-        if (get_alloc(block) == 1) {
-            print_error("Free list has allocated blocks");
-            print_free_list("Free List");
+    for (int i = 0; i < max_free_lists; i++) {
+        block_t *free_list_start = free_lists[i];
+
+        if (!is_acyclic(free_list_start)) {
+            print_error("free list has cycle.");
             return false;
         }
-        prev_next_pointers = get_free_block_contents(block);
-        num_free_list_blocks++;
+
+        if (free_list_start != NULL) {
+
+            block_t *block = free_list_start;
+            freed_block_contents_t *prev_next_pointers =
+                get_free_block_contents(block);
+
+            dbg_printheap("Check free list");
+            for (; block != NULL; block = (prev_next_pointers->next)) {
+
+                // check to make sure there are no allocated blocks in the heap
+                if (get_alloc(block) == 1) {
+                    print_error("Free list has allocated blocks");
+                    print_free_list("Free List");
+                    return false;
+                }
+
+                // check consistency of the current block's  next pointer 
+                block_t *next_block = get_next_free_block(block);
+                if (get_next_free_block(block) != NULL)
+                {
+                    if (get_prev_free_block(next_block) != block){
+                        print_error("Block next pointer is not consitent with the next block's previous pointer");
+                        return false;
+                    }
+                }
+
+                // check consistency of the current block's  previous pointer 
+                block_t *prev_block = get_prev_free_block(block);
+                if (get_next_free_block(block) != NULL)
+                {
+                    if (get_next_free_block(prev_block) != block){
+                        print_error("Block prev pointer is not consitent with the previous block's next pointer");
+                        return false;
+                    }
+                }
+
+                prev_next_pointers = get_free_block_contents(block);
+                num_free_list_blocks++; // count total blocks in the free lists to compare with total free blocks in the heap
+            }
+        }
     }
 
     if (num_free_heap_blocks != num_free_list_blocks) {
@@ -963,6 +1129,11 @@ bool mm_init(void) {
         return false;
     }
 
+    // clear all free lists
+    for (int i = 0; i < max_free_lists; i++) {
+        free_lists[i] = NULL;
+    }
+
     /*
      * TODO: delete or replace this comment once you've thought about it.
      * Think about why we need a heap prologue and epilogue. Why do
@@ -979,6 +1150,7 @@ bool mm_init(void) {
     if (extend_heap(chunksize) == NULL) {
         return false;
     }
+
     return true;
 }
 
