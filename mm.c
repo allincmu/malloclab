@@ -143,6 +143,10 @@ static block_t *heap_start = NULL;
 /** @brief Pointer to first freed block in each seg list */
 static block_t *free_lists[max_free_lists];
 
+static const uint32_t free_list_size_limits[max_free_lists] = {
+    16,   32,   48,   64,   128,   256,   512,   768,
+    1024, 2048, 4096, 8192, 16384, 32768, 577536};
+
 #define free_list_0_max_size 16
 #define free_list_1_max_size 32
 #define free_list_2_max_size 48
@@ -184,102 +188,34 @@ static bool block_is_alligned(block_t *curr_block);
 static size_t get_size(block_t *block);
 
 static block_t *get_free_list(size_t size) {
-    if (size <= free_list_0_max_size)
-        return free_lists[0];
-    else if (size <= free_list_1_max_size)
-        return free_lists[1];
-    else if (size <= free_list_2_max_size)
-        return free_lists[2];
-    else if (size <= free_list_3_max_size)
-        return free_lists[3];
-    else if (size <= free_list_4_max_size)
-        return free_lists[4];
-    else if (size <= free_list_5_max_size)
-        return free_lists[5];
-    else if (size <= free_list_6_max_size)
-        return free_lists[6];
-    else if (size <= free_list_7_max_size)
-        return free_lists[7];
-    else if (size <= free_list_8_max_size)
-        return free_lists[8];
-    else if (size <= free_list_9_max_size)
-        return free_lists[9];
-    else if (size <= free_list_10_max_size)
-        return free_lists[10];
-    else if (size <= free_list_11_max_size)
-        return free_lists[11];
-    else if (size <= free_list_12_max_size)
-        return free_lists[12];
-    else if (size <= free_list_13_max_size)
-        return free_lists[13];
-    else
-        return free_lists[14];
+    for (int i = 0; i < max_free_lists; i++) {
+        if (size <= free_list_size_limits[i]) {
+            return free_lists[i];
+        }
+    }
+    dbg_assert(size > free_list_size_limits[max_free_lists - 2]);
+    return free_lists[max_free_lists - 1];
 }
 
 static int get_free_list_index(size_t size) {
-    if (size <= free_list_0_max_size)
-        return 0;
-    else if (size <= free_list_1_max_size)
-        return 1;
-    else if (size <= free_list_2_max_size)
-        return 2;
-    else if (size <= free_list_3_max_size)
-        return 3;
-    else if (size <= free_list_4_max_size)
-        return 4;
-    else if (size <= free_list_5_max_size)
-        return 5;
-    else if (size <= free_list_6_max_size)
-        return 6;
-    else if (size <= free_list_7_max_size)
-        return 7;
-    else if (size <= free_list_8_max_size)
-        return 8;
-    else if (size <= free_list_9_max_size)
-        return 9;
-    else if (size <= free_list_10_max_size)
-        return 10;
-    else if (size <= free_list_11_max_size)
-        return 11;
-    else if (size <= free_list_12_max_size)
-        return 12;
-    else if (size <= free_list_13_max_size)
-        return 13;
-    else
-        return 14;
+    for (int i = 0; i < max_free_lists; i++) {
+        if (size <= free_list_size_limits[i]) {
+            return i;
+        }
+    }
+    dbg_assert(size > free_list_size_limits[max_free_lists - 2]);
+    return max_free_lists - 1;
 }
 
 static void write_free_list_start(size_t size, block_t *block) {
-    if (size <= free_list_0_max_size)
-        free_lists[0] = block;
-    else if (size <= free_list_1_max_size)
-        free_lists[1] = block;
-    else if (size <= free_list_2_max_size)
-        free_lists[2] = block;
-    else if (size <= free_list_3_max_size)
-        free_lists[3] = block;
-    else if (size <= free_list_4_max_size)
-        free_lists[4] = block;
-    else if (size <= free_list_5_max_size)
-        free_lists[5] = block;
-    else if (size <= free_list_6_max_size)
-        free_lists[6] = block;
-    else if (size <= free_list_7_max_size)
-        free_lists[7] = block;
-    else if (size <= free_list_8_max_size)
-        free_lists[8] = block;
-    else if (size <= free_list_9_max_size)
-        free_lists[9] = block;
-    else if (size <= free_list_10_max_size)
-        free_lists[10] = block;
-    else if (size <= free_list_11_max_size)
-        free_lists[11] = block;
-    else if (size <= free_list_12_max_size)
-        free_lists[12] = block;
-    else if (size <= free_list_13_max_size)
-        free_lists[13] = block;
-    else
-        free_lists[14] = block;
+    for (int i = 0; i < max_free_lists; i++) {
+        if (size <= free_list_size_limits[i]) {
+            free_lists[i] = block;
+            return;
+        }
+    }
+    dbg_assert(size > free_list_size_limits[max_free_lists - 2]);
+    free_lists[max_free_lists - 1] = block;
 }
 
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
@@ -472,6 +408,7 @@ static block_t *footer_to_header(word_t *footer) {
     return (block_t *)((char *)footer + wsize - size);
 }
 
+static bool get_alloc(block_t *block);
 /**
  * @brief Returns the payload size of a given block.
  *
@@ -483,7 +420,10 @@ static block_t *footer_to_header(word_t *footer) {
  */
 static size_t get_payload_size(block_t *block) {
     size_t asize = get_size(block);
-    return asize - dsize;
+    if (get_alloc(block) == 0)
+        return asize - dsize;
+    else
+        return asize - wsize;
 }
 
 /**
@@ -538,15 +478,14 @@ static void write_block(block_t *block, size_t size, bool alloc) {
     if (alloc == true && get_alloc(block) == false) {
         remove_free_block(block);
     }
-
     block->header = pack(size, alloc);
-    word_t *footerp = header_to_footer(block);
-    *footerp = pack(size, alloc);
 
     block_t *free_list_start = get_free_list(get_size(block));
 
     if (alloc == false) {
         // write next and prev pointers
+        word_t *footerp = header_to_footer(block);
+        *footerp = pack(size, alloc);
         if (free_list_start != block)
             write_next_pointer(block, free_list_start);
         else
@@ -556,10 +495,10 @@ static void write_block(block_t *block, size_t size, bool alloc) {
             free_list_start != block)
             write_prev_pointer(free_list_start, block);
         write_free_list_start(get_size(block), block);
-    }
-
-    if (get_size(block) != extract_size(*header_to_footer(block))) {
-        dbg_assert(get_size(block) == extract_size(*header_to_footer(block)));
+        if (get_size(block) != extract_size(*header_to_footer(block))) {
+            dbg_assert(get_size(block) ==
+                       extract_size(*header_to_footer(block)));
+        }
     }
 }
 
@@ -674,12 +613,16 @@ static bool check_header_footer(block_t *curr_block) {
     word_t header = curr_block->header;
     word_t footer = *header_to_footer(curr_block);
 
+    if (get_alloc(curr_block) == 1)
+        return true; // block is allocated and has no footer
     if (get_size(curr_block) < min_block_size) {
         print_error("Block smaller than min size.");
         return false;
     }
     if (extract_size(header) != extract_size(footer)) {
-        print_error("Block size inconsistent between header and footer.");
+        printf(
+            "Error: Block size inconsistent between header and footer: %p \n",
+            curr_block);
         return false;
     }
     if (extract_alloc(header) != extract_alloc(footer)) {
@@ -698,6 +641,12 @@ static void print_heap(char *msg) {
                    curr_block, get_size(curr_block), get_alloc(curr_block),
                    (void *)get_prev_free_block(curr_block),
                    (void *)get_next_free_block(curr_block), msg);
+        }
+        if (get_alloc(curr_block) == true) {
+            printf("addr: %p \t size: %zu \t alloc: %d \t next_block: %p"
+                   "\t\t\t msg: %s \n",
+                   curr_block, get_size(curr_block), get_alloc(curr_block),
+                   curr_block + get_size(curr_block), msg);
         }
     }
     printf("\n");
@@ -1115,7 +1064,7 @@ bool mm_checkheap(int line) {
 
                 // check consistency of the current block's  previous pointer
                 block_t *prev_block = get_prev_free_block(block);
-                if (get_next_free_block(block) != NULL) {
+                if (get_prev_free_block(block) != NULL) {
                     if (get_next_free_block(prev_block) != block) {
                         print_error("Block prev pointer is not consitent with "
                                     "the previous block's next pointer");
@@ -1125,8 +1074,8 @@ bool mm_checkheap(int line) {
 
                 // check that all free list pointers are between mem_heap_lo and
                 // mem_heap_hi
-                if (!block_within_heap(next_block) ||
-                    !block_within_heap(prev_block) ||
+                if ((!block_within_heap(next_block) && next_block != NULL) ||
+                    (!block_within_heap(prev_block) && prev_block != NULL) ||
                     !block_within_heap(block)) {
                     print_error("Block prev pointer or next pointer points "
                                 "outside of the heap");
@@ -1230,7 +1179,7 @@ void *malloc(size_t size) {
     }
 
     // Adjust block size to include overhead and to meet alignment requirements
-    asize = round_up(size + dsize, dsize);
+    asize = round_up(size + wsize, dsize);
 
     // Search the free list for a fit
     block = find_fit(asize);
