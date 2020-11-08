@@ -83,7 +83,10 @@ static const size_t wsize = sizeof(word_t);
 static const size_t dsize = 2 * wsize;
 
 /** @brief Minimum block size (bytes) */
-static const size_t min_block_size = dsize;
+static const size_t min_block_size = 2 * dsize;
+
+/** @brief Size of Header and 2 pointers */
+static const size_t header_and_pointer_size = wsize + 2 * sizeof(void *);
 
 /**
  * TODO: explain what chunksize is
@@ -190,6 +193,7 @@ static block_t *find_next(block_t *block);
 static bool get_alloc(block_t *block);
 static bool get_prev_alloc(block_t *block);
 static word_t pack(size_t size, bool alloc, bool prev_alloc);
+static bool check_header_footer(block_t *curr_block);
 
 static block_t *get_free_list(size_t size) {
     for (int i = 0; i < max_free_lists; i++) {
@@ -539,10 +543,7 @@ static void write_block(block_t *block, size_t size, bool alloc) {
             free_list_start != block)
             write_prev_pointer(free_list_start, block);
         write_free_list_start(get_size(block), block);
-        if (get_size(block) != extract_size(*header_to_footer(block))) {
-            dbg_assert(get_size(block) ==
-                       extract_size(*header_to_footer(block)));
-        }
+        dbg_assert(check_header_footer(block));
     }
 }
 
@@ -779,7 +780,8 @@ static block_t *coalesce_block(block_t *block) {
          (get_prev_alloc(block) == false && prev_block != block))) {
 
         size_t prev_block_size;
-        if (get_prev_alloc(block) == false) //only get prev block size if it is freed
+        if (get_prev_alloc(block) ==
+            false) // only get prev block size if it is freed
             prev_block_size = get_size(prev_block);
         size_t next_block_size = get_size(next_block);
 
@@ -1266,8 +1268,13 @@ void *malloc(size_t size) {
     block_t *next_block = find_next(block);
     write_prev_alloc(next_block, true);
 
-    // // remove_free_block(block);
-    write_next_pointer(block, NULL);
+    // remove_free_block(block);
+
+    if (get_size(block) >
+        header_and_pointer_size) // if block size is less than  the size of a
+                                 // header plus the 2 pointers, the next block
+                                 // will be overwritten
+        write_next_pointer(block, NULL);
     write_prev_pointer(block, NULL);
 
     bp = header_to_payload(block);
