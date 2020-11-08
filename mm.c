@@ -283,11 +283,8 @@ static void write_free_list_start(size_t size, block_t *block) {
 }
 
 static freed_block_contents_t *get_free_block_contents(block_t *block) {
-
-    block_contents_t *block_payload_start =
-        (block_contents_t *)&(block->payload_contents);
     freed_block_contents_t *prev_next_pointers =
-        (freed_block_contents_t *)&(block_payload_start->prev_next_pointers);
+        &(block->payload_contents.prev_next_pointers);
     return prev_next_pointers;
 }
 
@@ -320,23 +317,21 @@ static bool is_acyclic(block_t *free_list_start) {
     return false;
 }
 
+/**
+ * @brief
+ * TODO: fix the function
+ */
 static void write_next_pointer(block_t *block, block_t *next_free_block) {
-    ((freed_block_contents_t *)&(
-         ((block_contents_t *)&(block->payload_contents))->prev_next_pointers))
-        ->next = next_free_block;
-    // *((block_t **)(block + 2 * sizeof((next_free_block)))) = next_free_block;
+    block->payload_contents.prev_next_pointers.next = next_free_block;
 }
+
 /**
  * @brief
  * TODO: fix the function
  */
 static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
     dbg_requires((block) != NULL);
-    ((freed_block_contents_t *)&(
-         ((block_contents_t *)&(block->payload_contents))->prev_next_pointers))
-        ->prev = prev_free_block;
-    // *(block_t **)(block + sizeof((prev_free_block))) =
-    //     prev_free_block; /////////////////////
+    block->payload_contents.prev_next_pointers.prev = prev_free_block;
 }
 
 static block_t *remove_free_block(block_t *block) {
