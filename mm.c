@@ -264,7 +264,8 @@ static void write_next_pointer(block_t *block, block_t *next_free_block) {
  * TODO: fix the function
  */
 static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
-    dbg_requires((block) != NULL);
+    if (block == NULL)
+        return;
     if (get_size(block) >= min_full_free_block_size)
         block->payload_contents.prev_next_pointers.prev = prev_free_block;
 }
@@ -430,7 +431,7 @@ static bool get_alloc(block_t *block);
  */
 static size_t get_payload_size(block_t *block) {
     size_t asize = get_size(block);
-    if (get_alloc(block) == 0)
+    if (get_alloc(block) == 0 && get_size(block) >= min_full_free_block_size)
         return asize - dsize;
     else
         return asize - wsize;
@@ -492,6 +493,16 @@ static void write_epilogue(block_t *block) {
     block->header = pack(0, true, false);
 }
 
+// static bool blockB_inside_blockA(block_t *blockA, block_t *blockb) {
+//     void *blockA_start = (void *)blockA;
+//     void *blockA_end = (void *)blockA + get_size(blockA);
+
+//     void *blockA_start = (void *)blockA;
+//     void *blockA_end = (void *)blockA + get_size(blockA);
+
+//     return ()
+// }
+
 /**
  * @brief Writes a block starting at the given address.
  *
@@ -510,10 +521,6 @@ static void write_block(block_t *block, size_t size, bool alloc) {
 
     if (alloc == true && get_alloc(block) == false) {
         remove_free_block(block);
-        // block_t *next_block = find_next(block);
-        // write_prev_alloc(next_block, true);
-        // dbg_assert(get_prev_alloc(next_block) == true);
-        // dbg_printheap("pack");
     }
 
     bool prev_alloc = get_prev_alloc(block);
@@ -524,16 +531,25 @@ static void write_block(block_t *block, size_t size, bool alloc) {
     if (alloc == false) {
         // write next and prev pointers
         word_t *footerp = header_to_footer(block);
+        // if (get_size(block) >= min_full_free_block_size)
         *footerp = block->header;
-        if (free_list_start != block)
+
+        // if block is not at the start of the list we add it to the front
+        if (free_list_start != block) {
             write_next_pointer(block, free_list_start);
-        else
-            write_next_pointer(block, get_next_free_block(block));
-        write_prev_pointer(block, NULL);
-        if (free_list_start != NULL && get_alloc(free_list_start) == false &&
-            free_list_start != block)
-            write_prev_pointer(free_list_start, block);
-        write_free_list_start(get_size(block), block);
+            write_prev_pointer(get_next_free_block(block), block);
+
+            write_free_list_start(get_size(block), block);
+            write_prev_pointer(block, NULL);
+        }
+        // else {
+        //     write_next_pointer(block, get_next_free_block(block));
+        // }
+
+        // if (free_list_start != NULL &&
+        //     get_alloc(free_list_start) == false && free_list_start != block)
+        //     write_prev_pointer(free_list_start, block);
+
         dbg_assert(check_header_footer(block));
     }
 }
@@ -632,7 +648,8 @@ static bool block_is_alligned(block_t *curr_block) {
  */
 static bool block_within_heap(block_t *curr_block) {
     if ((void *)curr_block < mem_heap_lo() ||
-        (void *)curr_block > mem_heap_hi() || curr_block == NULL) {
+        (void *)curr_block + get_size(curr_block) > mem_heap_hi() ||
+        curr_block == NULL) {
         return false;
     }
     return true;
@@ -689,8 +706,8 @@ static void print_heap(char *msg) {
                    "next_block: %p"
                    "\t\t\t msg: %s \n",
                    curr_block, get_size(curr_block), get_prev_alloc(curr_block),
-                   get_alloc(curr_block), curr_block + get_size(curr_block),
-                   msg);
+                   get_alloc(curr_block),
+                   (void *)curr_block + get_size(curr_block), msg);
         }
     }
     printf("\n");
@@ -762,7 +779,8 @@ static block_t *coalesce_block(block_t *block) {
 
     dbg_printheap("");
     block_t *prev_block;
-    if (get_size(block) >= min_full_free_block_size)
+    if (get_prev_alloc(block) == false &&
+        get_size(block) >= min_full_free_block_size)
         prev_block = find_prev(block);
     block_t *next_block = find_next(block);
     size_t curr_block_size = get_size(block);
@@ -791,59 +809,95 @@ static block_t *coalesce_block(block_t *block) {
              (get_prev_alloc(block) == false && prev_block == block)) &&
             (get_alloc(next_block) == false && next_block != block)) {
 
+            // get the start of the free list that the coalesced block should be
+            // placed in
             block_t *free_list_start =
                 get_free_list(curr_block_size + next_block_size);
 
+            // if the first block is not in the same bucket as the final
+            // coalesced block we remove it
             if (block != free_list_start) {
                 remove_free_block(block);
                 dbg_printheap("remove curr block");
             }
+
+            // we always want to remove the next block
+            remove_free_block(next_block);
+
             write_block(block, curr_block_size + next_block_size, false);
             dbg_printheap("write new block");
-            remove_free_block(next_block);
-            dbg_printheap("remove next block");
             dbg_printf("case 2");
         }
 
-        // case 3
+        // case 3: coalesce previous block, current block
         else if ((get_prev_alloc(block) == false && prev_block != block) &&
                  (get_alloc(next_block) == true)) {
 
+            // get the start of the free list that the coalesced block should be
+            // placed in
             block_t *free_list_start =
                 get_free_list(curr_block_size + prev_block_size);
 
+            // if the prev block is not the start of the bucket of the final
+            // coalesced block we remove it
             if (prev_block != free_list_start) {
                 remove_free_block(prev_block);
                 dbg_printheap("remove prev block");
             }
+
+            // we always remove the current block
+            remove_free_block(block);
+
             write_block(prev_block, curr_block_size + prev_block_size, false);
             dbg_printheap("write new block");
 
-            remove_free_block(block);
-            dbg_printheap("rem curr block");
-
+            // set the coalesced block
             block = prev_block;
             dbg_printf("case 3");
         }
 
-        // case 4
+        // case 4 : coalesce previous block, current block, and next block
         else if ((get_prev_alloc(block) == false && prev_block != block) &&
                  (get_alloc(next_block) == false)) {
 
-            remove_free_block(prev_block);
-            dbg_printheap("remove block 68");
+            // get the start of the free list that the coalesced block should be
+            // placed in
+            block_t *free_list_start =
+                get_free_list(curr_block_size + prev_block_size);
 
-            write_block(prev_block,
-                        curr_block_size + prev_block_size + next_block_size,
-                        false);
-            dbg_printheap("write new combined block");
-            remove_free_block(next_block);
-            dbg_printheap("remove next block");
+            // if the prev block is not the start of the bucket of the final
+            // coalesced block we remove it
+            if (prev_block != free_list_start) {
+                remove_free_block(prev_block);
+                dbg_printheap("remove prev block");
+            }
+
+            // we always remove the current and next blocks
             remove_free_block(block);
-            dbg_printheap("remove block");
+            remove_free_block(next_block);
 
+            // write the coalesced block
+            write_block(prev_block, curr_block_size + prev_block_size, false);
+            dbg_printheap("write new block");
+
+            // set the coalesced block
             block = prev_block;
             dbg_printf("case 4");
+
+            // remove_free_block(prev_block);
+            // dbg_printheap("remove block 68");
+
+            // write_block(prev_block,
+            //             curr_block_size + prev_block_size + next_block_size,
+            //             false);
+            // dbg_printheap("write new combined block");
+            // remove_free_block(next_block);
+            // dbg_printheap("remove next block");
+            // remove_free_block(block);
+            // dbg_printheap("remove block");
+
+            // block = prev_block;
+            // dbg_printf("case 4");
         }
     }
 
@@ -889,8 +943,9 @@ static block_t *extend_heap(size_t size) {
 
     if (orig_heap_size >= min_block_size) // only write the prev alloc if there
                                           // are blocks in the heap
+    {
         write_prev_alloc(block, extract_prev_alloc(old_epilogue));
-
+    }
     // if there are no free blocks in the free list, set free_list_start to this
     // block
     block_t *free_list_start = get_free_list(get_size(block));
