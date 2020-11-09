@@ -83,10 +83,14 @@ static const size_t wsize = sizeof(word_t);
 static const size_t dsize = 2 * wsize;
 
 /** @brief Minimum block size (bytes) */
-static const size_t min_block_size = 2 * dsize;
+static const size_t min_block_size = dsize;
 
 /** @brief Size of Header and 2 pointers */
 static const size_t header_and_pointer_size = wsize + 2 * sizeof(void *);
+
+/** @brief Minimum size of a free block that has a header, prev and next
+ * pointers, and a footer */
+static const size_t min_full_free_block_size = 32;
 
 /**
  * TODO: explain what chunksize is
@@ -107,8 +111,8 @@ static const word_t size_mask = ~(word_t)0xF;
 typedef struct block block_t;
 typedef struct freed_block_contents {
 
-    block_t *prev;
     block_t *next;
+    block_t *prev;
 
 } freed_block_contents_t;
 
@@ -149,22 +153,6 @@ static block_t *free_lists[max_free_lists];
 static const uint32_t free_list_size_limits[max_free_lists] = {
     16,   32,   48,   64,   128,   256,   512,   768,
     1024, 2048, 4096, 8192, 16384, 32768, 577536};
-
-#define free_list_0_max_size 16
-#define free_list_1_max_size 32
-#define free_list_2_max_size 48
-#define free_list_3_max_size 64
-#define free_list_4_max_size 128
-#define free_list_5_max_size 256
-#define free_list_6_max_size 512
-#define free_list_7_max_size 768
-#define free_list_8_max_size 1024
-#define free_list_9_max_size 2048
-#define free_list_10_max_size 4096
-#define free_list_11_max_size 8192
-#define free_list_12_max_size 16384
-#define free_list_13_max_size 32768
-#define free_list_14_max_size 577536
 
 /*
  *****************************************************************************
@@ -233,6 +221,8 @@ static freed_block_contents_t *get_free_block_contents(block_t *block) {
 }
 
 static block_t *get_prev_free_block(block_t *block) {
+    if (get_size(block) < min_full_free_block_size)
+        return NULL;
     freed_block_contents_t *prev_next_pointers = get_free_block_contents(block);
     return prev_next_pointers->prev;
 }
@@ -275,7 +265,8 @@ static void write_next_pointer(block_t *block, block_t *next_free_block) {
  */
 static void write_prev_pointer(block_t *block, block_t *prev_free_block) {
     dbg_requires((block) != NULL);
-    block->payload_contents.prev_next_pointers.prev = prev_free_block;
+    if (get_size(block) >= min_full_free_block_size)
+        block->payload_contents.prev_next_pointers.prev = prev_free_block;
 }
 
 static void write_prev_alloc(block_t *block, bool prev_alloc) {
@@ -661,10 +652,14 @@ static bool check_header_footer(block_t *curr_block) {
     if (get_alloc(curr_block) == 1)
         return true; // block is allocated and has no footer
     if (get_size(curr_block) < min_block_size) {
+        dbg_printf("size: %zu", get_size(curr_block));
         print_error("Block smaller than min size.");
         return false;
     }
-    if (extract_size(header) != extract_size(footer)) {
+
+    /** TODO: magic number */
+    if (extract_size(header) != extract_size(footer) &&
+        get_size(curr_block) >= min_full_free_block_size) {
         printf(
             "Error: Block size inconsistent between header and footer: %p \n",
             curr_block);
@@ -766,7 +761,9 @@ static block_t *coalesce_block(block_t *block) {
     dbg_requires(get_alloc(block) == false);
 
     dbg_printheap("");
-    block_t *prev_block = find_prev(block);
+    block_t *prev_block;
+    if (get_size(block) >= min_full_free_block_size)
+        prev_block = find_prev(block);
     block_t *next_block = find_next(block);
     size_t curr_block_size = get_size(block);
 
@@ -788,7 +785,7 @@ static block_t *coalesce_block(block_t *block) {
         // case 2
         /* prev_block == block when prev_block is the prolgue block. the
          * prologue block is freed and we do not want to coalesce the prologue
-         *block with block
+         * block with block
          */
         if ((get_prev_alloc(block) == true ||
              (get_prev_alloc(block) == false && prev_block == block)) &&
@@ -805,15 +802,6 @@ static block_t *coalesce_block(block_t *block) {
             dbg_printheap("write new block");
             remove_free_block(next_block);
             dbg_printheap("remove next block");
-
-            // block_t *prev_of_next_block =
-            // get_prev_free_block(next_block); if (prev_of_next_block !=
-            // NULL)
-            //     write_next_pointer(get_prev_free_block(next_block),
-            //                        get_next_free_block(next_block));
-            // if (get_next_free_block(next_block) != NULL)
-            //     write_prev_pointer(get_next_free_block(next_block),
-            //                        prev_of_next_block);
             dbg_printf("case 2");
         }
 
@@ -1103,6 +1091,9 @@ bool mm_checkheap(int line) {
             dbg_printheap("Check free list");
             for (; block != NULL; block = (prev_next_pointers->next)) {
 
+                if (get_size(block) == 0) {
+                    num_free_list_blocks--;
+                }
                 // check to make sure there are no allocated blocks in the free
                 // list
                 if (get_alloc(block) == 1) {
@@ -1113,8 +1104,10 @@ bool mm_checkheap(int line) {
 
                 // check consistency of the current block's next pointer
                 block_t *next_block = get_next_free_block(block);
-                if (get_next_free_block(block) != NULL) {
-                    if (get_prev_free_block(next_block) != block) {
+                if (get_next_free_block(block) != NULL &&
+                    get_size(block) >= min_full_free_block_size) {
+                    if (get_prev_free_block(next_block) != block &&
+                        get_size(next_block) >= min_full_free_block_size) {
                         print_error("Block next pointer is not consitent with "
                                     "the next block's previous pointer");
                         return false;
@@ -1142,7 +1135,9 @@ bool mm_checkheap(int line) {
                 }
 
                 // check block is in the right bucket
-                if (get_free_list_index(get_size(block)) != i) {
+                if (get_free_list_index(get_size(block)) != i &&
+                    get_size(block) >= min_full_free_block_size) {
+                    print_free_list(""); // remove this
                     print_error("Block in incorrect bucket");
                     return false;
                 }
