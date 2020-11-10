@@ -62,6 +62,7 @@
 #define dbg_assert(expr) assert(expr)
 #define dbg_ensures(expr) assert(expr)
 #define dbg_printheap(...) print_heap(__VA_ARGS__)
+#define dbg_printfreelist(...) print_free_list(__VA_ARGS__)
 #else
 /* When DEBUG is not defined, no code gets generated for these */
 /* The sizeof() hack is used to avoid "unused variable" warnings */
@@ -70,6 +71,7 @@
 #define dbg_assert(expr) (sizeof(expr), 1)
 #define dbg_ensures(expr) (sizeof(expr), 1)
 #define dbg_printheap(...) ((void)sizeof(__VA_ARGS__))
+#define dbg_printfreelist(...) ((void)sizeof(__VA_ARGS__))
 #endif
 
 /* Basic constants */
@@ -96,7 +98,7 @@ static const size_t min_full_free_block_size = 32;
  * @brief number of bytes to extend the heap
  * (Must be divisible by dsize)
  */
-static const size_t chunksize = (1 << 12);
+static const size_t chunksize = (1 << 11);
 
 /**
  * @brief isolates the bit of the header/footer associated with whether the
@@ -163,9 +165,8 @@ static block_t *heap_start = NULL;
 /** @brief Pointer to first freed block in each seg list */
 static block_t *free_lists[max_free_lists];
 
-static const uint32_t free_list_size_limits[max_free_lists] = {
-    16,   32,   48,   64,   128,   256,   512,   768,
-    1024, 2048, 4096, 8192, 16384, 32768, 577536};
+/** @brief An array of the size limits of each  */
+static const size_t free_list_size_limits[max_free_lists] = {16,   32,   48,   64,   128,   256,   512,   768,1024, 2048, 4096, 8192, 16384, 32768, 577536};
 
 /*
  *****************************************************************************
@@ -195,6 +196,7 @@ static bool get_alloc(block_t *block);
 static bool get_prev_alloc(block_t *block);
 static word_t pack(size_t size, bool alloc, bool prev_alloc);
 static bool check_header_footer(block_t *curr_block);
+static void print_free_list(char *msg);
 
 static block_t *get_free_list(size_t size) {
     for (int i = 0; i < max_free_lists; i++) {
@@ -321,18 +323,27 @@ static block_t *remove_free_block(block_t *block) {
 
     if (prev_block != NULL) {
         write_next_pointer(prev_block, next_block);
-        dbg_printheap("wrote prev_block's next pointer");
     }
     if (next_block != NULL) {
         write_prev_pointer(next_block, prev_block);
-        dbg_printheap("wrote next_block's prev pointer");
     }
 
-    if (prev_block == NULL && next_block == NULL)
+    if (prev_block == NULL && next_block == NULL && free_list_start == block) {
+        // block is only item in free list
         write_free_list_start(get_size(block), NULL);
-    else if (block == free_list_start)
+    } else if (block == free_list_start) {
+        // remove block
         write_free_list_start(get_size(block), next_block);
-
+    } else if (get_size(block) <= min_block_size) {
+        // free list is list of miniblocks --> no prev pointer
+        for (block_t *curr_block = free_list_start; curr_block != NULL;
+             curr_block = get_next_free_block(curr_block)) {
+            if (get_next_free_block(curr_block) == block) {
+                write_next_pointer(curr_block, get_next_free_block(block));
+                break;
+            }
+        }
+    }
     // write_next_pointer(block, NULL);
     // write_prev_pointer(block, NULL);
 
@@ -670,6 +681,8 @@ static block_t *find_prev(block_t *block) {
  * @return nothing
  */
 static void print_error(char *error_msg) {
+    dbg_printheap("Heap");
+    print_free_list("Free List");
     printf("Error: %16s \n", error_msg);
 }
 
@@ -844,7 +857,7 @@ static block_t *coalesce_block(block_t *block) {
         // the miniblock is 16 bytes
         prev_block = (block_t *)((void *)block - min_block_size);
         dbg_assert(get_size(prev_block) == min_block_size);
-    } else {
+    } else if (get_prev_alloc(block) == false) {
         prev_block = find_prev(block);
     }
     block_t *next_block = find_next(block);
@@ -865,7 +878,7 @@ static block_t *coalesce_block(block_t *block) {
             prev_block_size = get_size(prev_block);
         size_t next_block_size = get_size(next_block);
 
-        // case 2
+        // case 2 : coalesce curr block with next block
         /* prev_block == block when prev_block is the prolgue block. the
          * prologue block is freed and we do not want to coalesce the prologue
          * block with block
@@ -883,14 +896,22 @@ static block_t *coalesce_block(block_t *block) {
             // coalesced block we remove it
             if (block != free_list_start) {
                 remove_free_block(block);
-                dbg_printheap("remove curr block");
             }
 
             // we always want to remove the next block
             remove_free_block(next_block);
 
-            write_block(block, curr_block_size + next_block_size, false);
-            dbg_printheap("write new block");
+            size_t coalesced_size = curr_block_size + next_block_size;
+
+            if (next_block_size < min_full_free_block_size &&
+                coalesced_size >= min_full_free_block_size) {
+                // next block is a miniblock but the coalesced block is not a
+                // miniblock rewrite miniblock bit on next block's header
+                block_t *block_after_coalesce = find_next(next_block);
+                write_prev_block_type(block_after_coalesce, false);
+            }
+
+            write_block(block, coalesced_size, false);
             dbg_printf("case 2");
         }
 
@@ -907,14 +928,23 @@ static block_t *coalesce_block(block_t *block) {
             // coalesced block we remove it
             if (prev_block != free_list_start) {
                 remove_free_block(prev_block);
-                dbg_printheap("remove prev block");
             }
 
             // we always remove the current block
             remove_free_block(block);
 
-            write_block(prev_block, curr_block_size + prev_block_size, false);
-            dbg_printheap("write new block");
+            size_t coalesced_size = curr_block_size + prev_block_size;
+
+            /** TODO: condense this to helper function */
+            if (curr_block_size < min_full_free_block_size &&
+                coalesced_size >= min_full_free_block_size) {
+                // curr_block is a miniblock but the coalesced block is not a
+                // miniblock rewrite miniblock bit on next block's header
+                block_t *block_after_coalesce = find_next(block);
+                write_prev_block_type(block_after_coalesce, false);
+            }
+
+            write_block(prev_block, coalesced_size, false);
 
             // set the coalesced block
             block = prev_block;
@@ -927,23 +957,33 @@ static block_t *coalesce_block(block_t *block) {
 
             // get the start of the free list that the coalesced block should be
             // placed in
-            block_t *free_list_start =
-                get_free_list(curr_block_size + prev_block_size);
+            block_t *free_list_start = get_free_list(
+                curr_block_size + prev_block_size + next_block_size);
 
             // if the prev block is not the start of the bucket of the final
             // coalesced block we remove it
             if (prev_block != free_list_start) {
                 remove_free_block(prev_block);
-                dbg_printheap("remove prev block");
             }
 
             // we always remove the current and next blocks
             remove_free_block(block);
             remove_free_block(next_block);
 
+            size_t coalesced_size =
+                curr_block_size + prev_block_size + next_block_size;
+
+            /** TODO: condense this to helper function */
+            if (next_block_size < min_full_free_block_size &&
+                coalesced_size >= min_full_free_block_size) {
+                // next_block is a miniblock but the coalesced block is not a
+                // miniblock rewrite miniblock bit on next block's header
+                block_t *block_after_coalesce = find_next(next_block);
+                write_prev_block_type(block_after_coalesce, false);
+            }
+
             // write the coalesced block
-            write_block(prev_block, curr_block_size + prev_block_size, false);
-            dbg_printheap("write new block");
+            write_block(prev_block, coalesced_size, false);
 
             // set the coalesced block
             block = prev_block;
@@ -1188,6 +1228,19 @@ bool mm_checkheap(int line) {
             return false;
         }
 
+        // check to make sure headers and footers are the same
+        if (get_size(curr_block) == min_block_size &&
+            !get_prev_block_type(find_next(curr_block))) {
+            print_error("miniblock but header not set");
+            return false;
+        }
+        // check to make sure headers and footers are the same
+        else if (get_size(curr_block) != min_block_size &&
+                 get_prev_block_type(find_next(curr_block))) {
+            print_error("no miniblock but header set");
+            return false;
+        }
+
         // check to make sure coalesing is correct
         // i.e. no free blocks next to each other
         if (get_alloc(curr_block) == 0 && prev_alloc == 0) {
@@ -1222,7 +1275,6 @@ bool mm_checkheap(int line) {
             freed_block_contents_t *prev_next_pointers =
                 get_free_block_contents(block);
 
-            dbg_printheap("Check free list");
             for (; block != NULL; block = (prev_next_pointers->next)) {
 
                 if (get_size(block) == 0) {
@@ -1232,7 +1284,6 @@ bool mm_checkheap(int line) {
                 // list
                 if (get_alloc(block) == 1) {
                     print_error("Free list has allocated blocks");
-                    print_free_list("Free List");
                     return false;
                 }
 
@@ -1271,7 +1322,6 @@ bool mm_checkheap(int line) {
                 // check block is in the right bucket
                 if (get_free_list_index(get_size(block)) != i &&
                     get_size(block) >= min_full_free_block_size) {
-                    print_free_list(""); // remove this
                     print_error("Block in incorrect bucket");
                     return false;
                 }
