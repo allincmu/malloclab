@@ -1,20 +1,73 @@
 /**
  * @file mm.c
- * @brief A 64-bit struct-based implicit free list memory allocator
+ * @brief A 64-bit struct-based explicit segregated free list memory allocator
  *
  * 15-213: Introduction to Computer Systems
  *
- * TODO: insert your documentation here. :)
+ * In this allocator, the heap is separated into blocks.
+ * Each block contains a header that is 8 bytes:
+ *  - The first bit of the header stores the allocation status of the block. It
+ *    is set if the block is allocated and unset if the the block is freed.
+ *  - The second bit stores the allocation status of the previous block.
+ *    Likewise, it is set if the previous block is alocated; unset if not
+ *  - The third bit denotes whether the previous block is a
+ *    miniblock (described below). It is set if the previous block is a
+ *    miniblock and unset if not.
  *
- *************************************************************************
+ * There are 3 types of blocks each with different fields:
+ *  1. Allocated block - Contains a header and a payload. Since we do not know
+ *     the size of the payload, it is declared as a zero length array, which is
+ *     a GCC compiler extension for a variable length object.
  *
- * ADVICE FOR STUDENTS.
- * - Step 0: Please read the writeup!
- * - Step 1: Write your heap checker.
- * - Step 2: Write contracts / debugging assert statements.
- * - Good luck, and have fun!
+ *  2. Freed Block - Freed blocks are stored in buckets of blocks of similar
+ *     sizes. These buckets are implemented as doubly linked lists. The ranges
+ *     of the sizes of the blocks inside each free list increases the higher up
+ *     you go. This allocator contains a total of 15 segregated free lists. A
+ *     pointer pointing to the start of each segregated free list is stored in a
+ *     global array of length 15.
+ *     A freed block contains a header. It also stores 2 pointers inside the
+ *     space of the original payload: a pointer pointing to the next freed block
+ *     in the segregated list and a pointer pointing to the previous freed block
+ *     in the segregated list. Following the space for the payload. The freed
+ *     block has a footer which is exactly the same as the header  and is useful
+ *     for traversing the heap backwards.
  *
- *************************************************************************
+ *  3. Miniblock - A miniblock is 16 bytes in size. Because of this it only
+ *     contains a header and a 8 byte payload. It can be both allocated and
+ *     freed. Since a freed miniblock contains no footer, this makes traversing
+ *     the heap backwards difficult. This is why the third bit of the header of
+ *     the next block denotes whether the block is a miniblock so the start of
+ *     the next block can be calculated. Since a miniblock is always 16 bytes.
+ *
+ * 1 struct is used to represent all 3 of these types of blocks. The way this is
+ * achieved is by creating a union with a  struct the previous and next pointers
+ * for a freed block and a 0 length array for the payload of an allocated block.
+ * In this way, 1 struct can be used to represent both allocated and unallocated
+ * blocks. A miniblock is also represented using this struct although the
+ * previous pointer and footer is not written to avoid overwriting information
+ * in subsequent blocks.
+ *
+ * This allocator implements the 4 functions: malloc, realloc, calloc, and free
+ * according to the libc routines.
+ *
+ * To malloc a block, the free list corresponding to the is traversed until the
+ * first block that fits is found (first fit). If no block is found in that free
+ * list, the allocator moves onto the next free list. This continues until a
+ * suitable block is found in the free lists. If no block is found, the heap is
+ * extended to provide space for the new block. If the block that is found is
+ * too big it is split into 2 smaller blocks as long as both blocks meet the 16
+ * byte allignment requriement. If either of these blocks is a miniblock, the
+ * miniblock status bit is set on the subsequent block.
+ *
+ * To free a block, the block is marked as unallocated and inserted into the
+ * head of the free list corresponding to the size of the block. If there this
+ * newly freed block is next to another freed block in the heap, the blocks are
+ * coalesced together. This involves removing the separate blocks from their
+ * free lists, rewriting the first block to be the combined size of all the
+ * blocks that were coalesced together and adding the the final combined block
+ * to the free list corresponding to its new size.
+ *
+ * The realloc and calloc functions remain unchanged from the starter code.
  *
  * @author Austin Lin <allin@andrew.cmu.edu>
  */
@@ -207,9 +260,9 @@ static const size_t free_list_size_limits[max_free_lists] = {
  * ---------------------------------------------------------------------------
  */
 
-/*********************
- * Function prototypes
- *********************/
+/******************************
+ * Helper Function prototypes
+ ******************************/
 
 /* Mathematical helper functions  */
 static size_t max(size_t x, size_t y);
@@ -237,8 +290,8 @@ static void write_prev_miniblock_status(block_t *block, bool miniblock);
 static size_t extract_size(word_t word);
 static bool extract_alloc(word_t word);
 static bool extract_prev_alloc(word_t word);
-static bool extract_prev_block_type(word_t word);
-static bool extract_prev_block_type(word_t word);
+static bool extract_prev_miniblock_status(word_t word);
+static bool extract_prev_miniblock_status(word_t word);
 
 /* These functions get data stored in the header of blocks */
 static size_t get_size(block_t *block);
@@ -628,7 +681,7 @@ static bool extract_prev_alloc(word_t word) {
  * @return The allocation status of the previous block correpsonding to the
  * word
  */
-static bool extract_prev_block_type(word_t word) {
+static bool extract_prev_miniblock_status(word_t word) {
     return (bool)(word & (prev_miniblock_status_mask));
 }
 
@@ -688,7 +741,7 @@ static bool get_prev_alloc(block_t *block) {
  * a miniblock and 0 if not
  */
 static bool get_prev_miniblock_status(block_t *block) {
-    return extract_prev_block_type(block->header);
+    return extract_prev_miniblock_status(block->header);
 }
 
 /**
@@ -1203,8 +1256,8 @@ static block_t *extend_heap(size_t size) {
     // the heap
     if (orig_heap_size >= min_block_size) {
         write_prev_alloc(block, extract_prev_alloc(old_epilogue));
-        write_prev_miniblock_status(block,
-                                    extract_prev_block_type(old_epilogue));
+        write_prev_miniblock_status(
+            block, extract_prev_miniblock_status(old_epilogue));
     }
 
     // if there are no free blocks in the free list, set free_list_start to
@@ -1483,8 +1536,9 @@ bool mm_checkheap(int line) {
 
 /**
  * @brief initialzes an empty heap
- * 
- * clears out all of the free lists, writes a heap prologue and epilogue, and extends the heap chunksize bytes
+ *
+ * clears out all of the free lists, writes a heap prologue and epilogue, and
+ * extends the heap chunksize bytes
  *
  * @return true if initialization was successful false otherwise
  */
@@ -1516,15 +1570,18 @@ bool mm_init(void) {
 }
 
 /**
- * @brief
+ * @brief allocates a block of at least the specified size
  *
- * <What does this function do?>
- * <What are the function's arguments?>
- * <What is the function's return value?>
- * <Are there any preconditions or postconditions?>
+ * traverses the free lists to find a block that is at least as big as the
+ * specified size if no blocks are found, the heap will be extended to the max
+ * of asize and chunksize if the block that fits is too big it is split into two
+ * blocks one the size of the requested size and the other the size of the
+ * remaining space it then sets the prev_alloc and prev_miniblok status bits of
+ * the next block's header
  *
- * @param[in] size
- * @return
+ * @param[in] size - the requested block size
+ * @return bp - a pointer to the payload of a block of at least the requested
+ * size
  */
 void *malloc(size_t size) {
     dbg_requires(mm_checkheap(__LINE__));
@@ -1601,14 +1658,13 @@ void *malloc(size_t size) {
 }
 
 /**
- * @brief
+ * @brief frees the specified block
  *
- * <What does this function do?>
- * <What are the function's arguments?>
- * <What is the function's return value?>
- * <Are there any preconditions or postconditions?>
+ * marks the  block as unallocated and sets the prev_alloc and previous block
+ * miniblock status bit on the header of the next block Then the block is
+ * coalesced if there are freed blocks next to it in the heap
  *
- * @param[in] bp
+ * @param[in] bp - a pointer pointing to the payload of the block to be freed
  */
 void free(void *bp) {
     dbg_requires(mm_checkheap(__LINE__));
@@ -1642,16 +1698,23 @@ void free(void *bp) {
 }
 
 /**
- * @brief
+ * @brief returns a pointer to an allocated region of at least size bytes with
+ * the following constraints:
  *
- * <What does this function do?>
- * <What are the function's arguments?>
- * <What is the function's return value?>
- * <Are there any preconditions or postconditions?>
+ * if ptr is null, the call is equivilent to malloc(size)
  *
- * @param[in] ptr
- * @param[in] size
- * @return
+ * if size is equal to 0, the call is equivalent to free(ptr)
+ *
+ * if ptr is not null, the call is equivalent to free(ptr) followed by
+ * malloc(size) except the contents of the new block will be the same as those
+ * fo teh old block up to the minimum of the old and new sizes
+ *
+ *
+ *
+ * @param[in] ptr - a pointer pointing to the block to be realloced
+ * @param[in] size - the requested size
+ * @return a pointer to a payload of a block of at least the requested size
+ * unless the size is 0 in which case it returns NULL
  */
 void *realloc(void *ptr, size_t size) {
     block_t *block = payload_to_header(ptr);
@@ -1691,16 +1754,13 @@ void *realloc(void *ptr, size_t size) {
 }
 
 /**
- * @brief
+ * @brief allocates memory for an array of elements and sets the memory to 0
+ * before returning
  *
- * <What does this function do?>
- * <What are the function's arguments?>
- * <What is the function's return value?>
- * <Are there any preconditions or postconditions?>
- *
- * @param[in] elements
- * @param[in] size
- * @return
+ * @param[in] elements - the number of elements to allocate
+ * @param[in] size - the size of each element
+ * @return a pointer to the payload of a block of at least the requested size
+ * and the memory set to 0
  */
 void *calloc(size_t elements, size_t size) {
     void *bp;
